@@ -1,0 +1,182 @@
+@import "tailwindcss";
+
+
+:root {
+  --bg-primary: #04060b;
+  --bg-secondary: #0d1428;
+
+  --card: #111a30;
+  --border: #263657;
+
+  --red: #ef4444;
+
+  --text: #f8fafc;
+  --muted: #94a3b8;
+
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+
+/* =========================================================
+   CONFIGURACIÓN BASE
+
+   Importante:
+   No colocar margin: 0 ni padding: 0 en el selector universal.
+   Eso anulaba los espacios de Tailwind.
+========================================================= */
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+
+  html {
+    min-height: 100%;
+    width: 100%;
+
+    background: var(--bg-primary);
+
+    scroll-behavior: smooth;
+  }
+
+
+  body {
+    min-height: 100vh;
+    width: 100%;
+
+    margin: 0;
+
+    overflow-x: hidden;
+
+    background: var(--bg-primary);
+
+    color: var(--text);
+
+    font-family:
+      "Inter",
+      "Segoe UI",
+      "Helvetica Neue",
+      Arial,
+      sans-serif;
+
+    font-weight: 400;
+
+    letter-spacing: -0.01em;
+
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+
+  #root {
+    min-height: 100vh;
+    width: 100%;
+  }
+
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family:
+      "Inter",
+      "Segoe UI",
+      "Helvetica Neue",
+      Arial,
+      sans-serif;
+
+    letter-spacing: -0.025em;
+
+    text-wrap: balance;
+  }
+
+
+  p,
+  span,
+  label,
+  input,
+  select,
+  textarea,
+  button {
+    text-rendering: optimizeLegibility;
+  }
+
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+
+  button {
+    cursor: pointer;
+  }
+
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+
+  input,
+  select,
+  textarea {
+    color-scheme: dark;
+  }
+
+
+  select option {
+    background: #070a10;
+    color: #f8fafc;
+  }
+}
+
+
+/* =========================================================
+   SELECCIÓN DE TEXTO
+========================================================= */
+
+::selection {
+  background: rgba(239, 68, 68, 0.32);
+  color: #ffffff;
+}
+
+
+/* =========================================================
+   SCROLLBAR
+========================================================= */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+
+::-webkit-scrollbar-track {
+  background: #05070d;
+}
+
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+
+  background: linear-gradient(
+    180deg,
+    rgba(239, 68, 68, 0.78),
+    rgba(127, 29, 29, 0.88)
+  );
+}
+
+
+::-webkit-scrollbar-thumb:hover {
+  background: #ef4444;
+}

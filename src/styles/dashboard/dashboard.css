@@ -1,0 +1,542 @@
+/* =========================================================
+   BLACK GHOST — DASHBOARD PREMIUM
+   ========================================================= */
+
+.dashboard-page {
+  min-height: 100%;
+  width: 100%;
+  min-width: 0;
+  padding: clamp(18px, 2.2vw, 38px);
+  color: #f8fafc;
+}
+
+.dashboard-container {
+  width: 100%;
+  max-width: 1680px;
+  min-width: 0;
+  margin: 0 auto;
+}
+
+
+/* =========================================================
+   BARRA DE FILTROS
+   ========================================================= */
+
+.dashboard-toolbar {
+  position: relative;
+  z-index: 20;
+
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 26px;
+}
+
+.dashboard-filter {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+
+  min-width: 0;
+  padding: 5px;
+
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 15px;
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(127, 29, 29, 0.09),
+      rgba(5, 7, 12, 0.72)
+    );
+
+  box-shadow:
+    0 16px 45px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.dashboard-filter button {
+  position: relative;
+
+  min-width: 74px;
+  padding: 10px 16px;
+
+  border: 0;
+  border-radius: 11px;
+
+  background: transparent;
+  color: #94a3b8;
+
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+
+  cursor: pointer;
+
+  transition:
+    color 220ms ease,
+    background-color 220ms ease,
+    transform 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.dashboard-filter button:hover {
+  color: #ffffff;
+  background: rgba(239, 68, 68, 0.09);
+}
+
+.dashboard-filter button:active {
+  transform: scale(0.97);
+}
+
+.dashboard-filter button.active {
+  color: #ffffff;
+
+  background:
+    linear-gradient(
+      135deg,
+      #991b1b,
+      #dc2626 55%,
+      #ef4444
+    );
+
+  box-shadow:
+    0 10px 25px rgba(239, 68, 68, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.dashboard-filter button.active::after {
+  content: "";
+
+  position: absolute;
+  right: 22%;
+  bottom: -5px;
+  left: 22%;
+
+  height: 2px;
+  border-radius: 999px;
+
+  background: #fb7185;
+
+  box-shadow:
+    0 0 10px rgba(251, 113, 133, 0.8);
+}
+
+
+/* =========================================================
+   SELECTOR DE FECHA
+   ========================================================= */
+
+.date-selector {
+  min-width: 156px;
+  height: 47px;
+  padding: 0 14px;
+
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 13px;
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(127, 29, 29, 0.07),
+      rgba(4, 6, 11, 0.78)
+    );
+
+  color: #f8fafc;
+  color-scheme: dark;
+
+  font-size: 12px;
+  font-weight: 700;
+
+  outline: none;
+
+  box-shadow:
+    0 15px 40px rgba(0, 0, 0, 0.23),
+    inset 0 1px 0 rgba(255, 255, 255, 0.035);
+
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+
+  transition:
+    border-color 220ms ease,
+    box-shadow 220ms ease,
+    background-color 220ms ease;
+}
+
+.date-selector:hover {
+  border-color: rgba(239, 68, 68, 0.42);
+}
+
+.date-selector:focus {
+  border-color: rgba(248, 113, 113, 0.62);
+
+  box-shadow:
+    0 0 0 3px rgba(239, 68, 68, 0.09),
+    0 18px 46px rgba(0, 0, 0, 0.28);
+}
+
+.date-selector::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.8;
+  filter:
+    invert(58%)
+    sepia(86%)
+    saturate(2760%)
+    hue-rotate(321deg)
+    brightness(100%)
+    contrast(95%);
+}
+
+
+/* =========================================================
+   TARJETAS DE ESTADÍSTICAS
+   ========================================================= */
+
+.stats-grid {
+  display: grid;
+
+  grid-template-columns:
+    repeat(4, minmax(0, 1fr));
+
+  gap: 18px;
+
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 24px;
+}
+
+.stats-grid > * {
+  min-width: 0;
+  height: 100%;
+}
+
+
+/* =========================================================
+   CUADRÍCULA DE GRÁFICOS
+   ========================================================= */
+
+.charts-grid {
+  display: grid;
+
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+
+  align-items: stretch;
+  gap: 22px;
+
+  width: 100%;
+  min-width: 0;
+  margin-bottom: 24px;
+}
+
+.charts-grid > * {
+  min-width: 0;
+  height: 100%;
+}
+
+
+/* =========================================================
+   SECCIÓN INFERIOR
+   ========================================================= */
+
+.bottom-grid {
+  display: grid;
+
+  grid-template-columns:
+    minmax(0, 1.75fr)
+    minmax(330px, 0.85fr);
+
+  align-items: stretch;
+  gap: 22px;
+
+  width: 100%;
+  min-width: 0;
+}
+
+.bottom-grid > * {
+  min-width: 0;
+  height: 100%;
+}
+
+
+/* =========================================================
+   RECHARTS
+   ========================================================= */
+
+.dashboard-page .recharts-responsive-container {
+  min-width: 0;
+}
+
+.dashboard-page .recharts-wrapper,
+.dashboard-page .recharts-surface {
+  outline: none;
+}
+
+.dashboard-page .recharts-tooltip-wrapper {
+  z-index: 50;
+  outline: none;
+}
+
+.dashboard-page .recharts-cartesian-axis-tick-value {
+  user-select: none;
+}
+
+.dashboard-page .recharts-sector {
+  outline: none;
+}
+
+
+/* =========================================================
+   SCROLLBARS
+   ========================================================= */
+
+.dashboard-page * {
+  scrollbar-width: thin;
+  scrollbar-color:
+    rgba(239, 68, 68, 0.45)
+    rgba(255, 255, 255, 0.035);
+}
+
+.dashboard-page *::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+.dashboard-page *::-webkit-scrollbar-track {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.dashboard-page *::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(220, 38, 38, 0.9),
+      rgba(127, 29, 29, 0.9)
+    );
+
+  background-clip: padding-box;
+}
+
+.dashboard-page *::-webkit-scrollbar-thumb:hover {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(239, 68, 68, 1),
+      rgba(185, 28, 28, 1)
+    );
+
+  background-clip: padding-box;
+}
+
+
+/* =========================================================
+   CARGA
+   ========================================================= */
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  min-height: 65vh;
+  width: 100%;
+
+  color: #fca5a5;
+
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.loading::before {
+  content: "";
+
+  width: 24px;
+  height: 24px;
+  margin-right: 12px;
+
+  border: 3px solid rgba(239, 68, 68, 0.16);
+  border-top-color: #ef4444;
+  border-radius: 999px;
+
+  animation: dashboard-spin 800ms linear infinite;
+}
+
+@keyframes dashboard-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
+/* =========================================================
+   CLASES DE APOYO
+   ========================================================= */
+
+.chart-large {
+  width: 100%;
+  height: 280px;
+  min-width: 0;
+}
+
+.dashboard-card {
+  min-width: 0;
+
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  border-radius: 26px;
+
+  background: rgba(7, 10, 17, 0.74);
+
+  box-shadow:
+    0 26px 80px rgba(0, 0, 0, 0.3);
+
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+
+/* =========================================================
+   ESCRITORIOS MEDIANOS
+   ========================================================= */
+
+@media (max-width: 1380px) {
+  .stats-grid {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+  }
+
+  .bottom-grid {
+    grid-template-columns:
+      minmax(0, 1.5fr)
+      minmax(310px, 0.9fr);
+  }
+}
+
+
+/* =========================================================
+   TABLETS Y PANTALLAS REDUCIDAS
+   ========================================================= */
+
+@media (max-width: 1120px) {
+  .charts-grid,
+  .bottom-grid {
+    grid-template-columns:
+      minmax(0, 1fr);
+  }
+
+  .dashboard-toolbar {
+    justify-content: space-between;
+  }
+
+  .bottom-grid > * {
+    height: auto;
+  }
+}
+
+
+/* =========================================================
+   CELULARES
+   ========================================================= */
+
+@media (max-width: 720px) {
+  .dashboard-page {
+    padding: 14px;
+  }
+
+  .dashboard-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 11px;
+
+    margin-bottom: 20px;
+  }
+
+  .dashboard-filter {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .dashboard-filter button {
+    flex: 1;
+    min-width: 68px;
+    padding: 10px 12px;
+  }
+
+  .date-selector {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .stats-grid {
+    grid-template-columns:
+      minmax(0, 1fr);
+
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+
+  .charts-grid,
+  .bottom-grid {
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .chart-large {
+    height: 250px;
+  }
+}
+
+
+/* =========================================================
+   CELULARES MUY PEQUEÑOS
+   ========================================================= */
+
+@media (max-width: 420px) {
+  .dashboard-page {
+    padding: 10px;
+  }
+
+  .dashboard-filter {
+    gap: 3px;
+    padding: 4px;
+  }
+
+  .dashboard-filter button {
+    min-width: 62px;
+    padding: 9px 8px;
+
+    font-size: 11px;
+  }
+
+  .date-selector {
+    height: 44px;
+  }
+}
+
+
+/* =========================================================
+   ACCESIBILIDAD
+   ========================================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-page *,
+  .dashboard-page *::before,
+  .dashboard-page *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
