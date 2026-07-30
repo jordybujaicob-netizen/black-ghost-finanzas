@@ -314,6 +314,10 @@ function getRpcErrorMessage(error) {
     return "La cuenta ya no está disponible";
   }
 
+  if (detail.includes("CUENTA_CON_MOVIMIENTOS")) {
+    return "Esta cuenta tiene movimientos y no puede eliminarse. Puedes archivarla para conservar su historial";
+  }
+
   if (detail.includes("USUARIO_NO_AUTENTICADO")) {
     return "Tu sesión terminó. Vuelve a iniciar sesión";
   }
@@ -434,8 +438,10 @@ function Cuentas() {
   const [tipo, setTipo] = useState("Banco");
   const [colorEdit, setColorEdit] = useState("#2563EB");
   const [iconoEdit, setIconoEdit] = useState("💳");
+  const [saldoInicialEdit, setSaldoInicialEdit] = useState("");
 
   const [cuentaParaArchivar, setCuentaParaArchivar] = useState(null);
+  const [cuentaParaEliminar, setCuentaParaEliminar] = useState(null);
   const [procesandoCuentaId, setProcesandoCuentaId] = useState(null);
 
   const [cuentaSeleccionada, setCuentaSeleccionada] = useState(null);
@@ -484,6 +490,8 @@ function Cuentas() {
   }, [cuentas]);
 
   const totalCuentas = cuentas.length + cuentasArchivadas.length;
+  const puedeEditarSaldoInicial =
+    editando?.cantidad_movimientos === 0;
 
   const cuentaOrigenSeleccionada = useMemo(
     () =>
@@ -584,6 +592,9 @@ function Cuentas() {
           return {
             ...cuenta,
             saldo_actual: saldo,
+            cantidad_movimientos: errorMov
+              ? null
+              : movimientosCuenta?.length || 0,
           };
         })
       );
@@ -625,6 +636,7 @@ function Cuentas() {
       isHexColor(cuenta.color) ? cuenta.color : "#2563EB"
     );
     setIconoEdit(cuenta.icono?.trim() || "💳");
+    setSaldoInicialEdit(String(Number(cuenta.saldo_inicial || 0)));
   }
 
   async function guardarEdicion(e) {
@@ -637,15 +649,68 @@ function Cuentas() {
       return;
     }
 
+    const saldoInicial = Number(saldoInicialEdit);
+
+    if (
+      puedeEditarSaldoInicial &&
+      !Number.isFinite(saldoInicial)
+    ) {
+      mostrarMensaje("Ingresa un saldo inicial válido", "error");
+      return;
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      mostrarMensaje("Tu sesión terminó. Vuelve a iniciar sesión", "error");
+      return;
+    }
+
+    const cambios = {
+      nombre: nombre.trim(),
+      tipo,
+      color: colorEdit,
+      icono: iconoEdit,
+    };
+
+    if (puedeEditarSaldoInicial) {
+      const { count, error: errorConteo } = await supabase
+        .from("movimientos")
+        .select("id", { count: "exact", head: true })
+        .eq("cuenta_id", editando.id)
+        .eq("usuario_id", user.id);
+
+      if (errorConteo) {
+        console.log(errorConteo);
+        mostrarMensaje(
+          "No se pudo comprobar el historial de la cuenta",
+          "error"
+        );
+        return;
+      }
+
+      if (Number(count || 0) > 0) {
+        setEditando((actual) => ({
+          ...actual,
+          cantidad_movimientos: Number(count || 0),
+        }));
+        mostrarMensaje(
+          "El saldo inicial quedó bloqueado porque la cuenta ya tiene movimientos",
+          "error"
+        );
+        return;
+      }
+
+      cambios.saldo_inicial = saldoInicial;
+    }
+
     const { error } = await supabase
       .from("cuentas")
-      .update({
-        nombre: nombre.trim(),
-        tipo,
-        color: colorEdit,
-        icono: iconoEdit,
-      })
-      .eq("id", editando.id);
+      .update(cambios)
+      .eq("id", editando.id)
+      .eq("usuario_id", user.id);
 
     if (error) {
       console.log(error);
@@ -658,9 +723,61 @@ function Cuentas() {
     setTipo("Banco");
     setColorEdit("#2563EB");
     setIconoEdit("💳");
+    setSaldoInicialEdit("");
 
     mostrarMensaje("Cuenta actualizada correctamente");
     cargarCuentas(false);
+  }
+
+  function solicitarEliminar(cuenta) {
+    if (cuenta.cantidad_movimientos !== 0) {
+      mostrarMensaje(
+        "Esta cuenta tiene movimientos y no puede eliminarse. Puedes archivarla para conservar su historial",
+        "error"
+      );
+      return;
+    }
+
+    setCuentaParaEliminar(cuenta);
+  }
+
+  async function confirmarEliminacion() {
+    if (!cuentaParaEliminar) return;
+
+    const cuenta = cuentaParaEliminar;
+    setProcesandoCuentaId(cuenta.id);
+
+    try {
+      const { error } = await supabase.rpc("eliminar_cuenta_vacia", {
+        p_cuenta_id: cuenta.id,
+      });
+
+      if (error) {
+        console.log(error);
+        mostrarMensaje(getRpcErrorMessage(error), "error");
+        return;
+      }
+
+      if (cuentaSeleccionada?.id === cuenta.id) {
+        cerrarDetalle();
+      }
+
+      if (editando?.id === cuenta.id) {
+        cerrarEdicion();
+      }
+
+      setTransferencia((actual) => ({
+        origen: actual.origen === cuenta.id ? "" : actual.origen,
+        destino: actual.destino === cuenta.id ? "" : actual.destino,
+        monto: actual.monto,
+      }));
+
+      setCuentaParaEliminar(null);
+      mostrarMensaje(`${cuenta.nombre} fue eliminada definitivamente`);
+      await cargarCuentas(false);
+    } finally {
+      setProcesandoCuentaId(null);
+    }
   }
 
   function solicitarArchivar(cuenta) {
@@ -880,6 +997,7 @@ function Cuentas() {
     setTipo("Banco");
     setColorEdit("#2563EB");
     setIconoEdit("💳");
+    setSaldoInicialEdit("");
   }
 
   function formatearMonto(valor) {
@@ -1377,6 +1495,7 @@ function Cuentas() {
               const esPrincipal = cuentaMayor?.id === cuenta.id;
               const accountColor = getAccountColor(cuenta, index);
               const accountIcon = getAccountIcon(cuenta);
+              const sinMovimientos = cuenta.cantidad_movimientos === 0;
 
               return (
                 <article
@@ -1591,30 +1710,59 @@ function Cuentas() {
                         Editar
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => solicitarArchivar(cuenta)}
-                        className="
-                          flex
-                          h-11
-                          w-full
-                          items-center
-                          justify-center
-                          rounded-xl
-                          border
-                          border-amber-500/20
-                          bg-amber-500/[0.07]
-                          px-4
-                          text-amber-300
-                          transition
-                          hover:border-amber-500/40
-                          hover:bg-amber-500/14
-                          sm:w-11
-                        "
-                        title="Archivar cuenta"
-                      >
-                        <Icon name="archive" className="h-4 w-4" />
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => solicitarArchivar(cuenta)}
+                          className="
+                            flex
+                            h-11
+                            w-full
+                            items-center
+                            justify-center
+                            rounded-xl
+                            border
+                            border-amber-500/20
+                            bg-amber-500/[0.07]
+                            px-4
+                            text-amber-300
+                            transition
+                            hover:border-amber-500/40
+                            hover:bg-amber-500/14
+                            sm:w-11
+                          "
+                          title="Archivar cuenta"
+                        >
+                          <Icon name="archive" className="h-4 w-4" />
+                        </button>
+
+                        {sinMovimientos && (
+                          <button
+                            type="button"
+                            onClick={() => solicitarEliminar(cuenta)}
+                            className="
+                              flex
+                              h-11
+                              w-full
+                              items-center
+                              justify-center
+                              rounded-xl
+                              border
+                              border-red-500/25
+                              bg-red-500/[0.08]
+                              px-4
+                              text-red-300
+                              transition
+                              hover:border-red-500/50
+                              hover:bg-red-500/15
+                              sm:w-11
+                            "
+                            title="Eliminar cuenta definitivamente"
+                          >
+                            <Icon name="trash" className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </article>
@@ -1739,6 +1887,7 @@ function Cuentas() {
                 const accountColor = getAccountColor(cuenta, index);
                 const accountIcon = getAccountIcon(cuenta);
                 const restaurando = procesandoCuentaId === cuenta.id;
+                const sinMovimientos = cuenta.cantidad_movimientos === 0;
 
                 return (
                   <article
@@ -1880,6 +2029,34 @@ function Cuentas() {
                                 </>
                               )}
                             </button>
+
+                            {sinMovimientos && (
+                              <button
+                                type="button"
+                                disabled={restaurando}
+                                onClick={() => solicitarEliminar(cuenta)}
+                                className="
+                                  flex
+                                  h-10
+                                  w-10
+                                  items-center
+                                  justify-center
+                                  rounded-xl
+                                  border
+                                  border-red-500/25
+                                  bg-red-500/[0.08]
+                                  text-red-300
+                                  transition
+                                  hover:border-red-500/50
+                                  hover:bg-red-500/15
+                                  disabled:cursor-not-allowed
+                                  disabled:opacity-60
+                                "
+                                title="Eliminar cuenta definitivamente"
+                              >
+                                <Icon name="trash" className="h-3.5 w-3.5" />
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -2808,6 +2985,198 @@ function Cuentas() {
       )}
 
       {/* =====================================================
+          MODAL ELIMINAR CUENTA
+      ====================================================== */}
+
+      {cuentaParaEliminar && (
+        <div
+          className="
+            fixed
+            inset-0
+            z-[115]
+            flex
+            items-center
+            justify-center
+            bg-black/80
+            p-5
+            backdrop-blur-md
+          "
+          onMouseDown={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              !procesandoCuentaId
+            ) {
+              setCuentaParaEliminar(null);
+            }
+          }}
+        >
+          <section
+            className="
+              w-full
+              max-w-md
+              overflow-hidden
+              rounded-[28px]
+              border-2
+              border-red-500/35
+              bg-[#080c14]/98
+              shadow-[0_34px_120px_rgba(0,0,0,0.80)]
+            "
+          >
+            <div className="border-b border-white/[0.09] px-7 py-6">
+              <div className="flex items-start gap-4">
+                <div
+                  className="
+                    flex
+                    h-12
+                    w-12
+                    shrink-0
+                    items-center
+                    justify-center
+                    rounded-2xl
+                    border
+                    border-red-500/35
+                    bg-red-500/10
+                    text-red-300
+                  "
+                >
+                  <Icon name="trash" className="h-5 w-5" />
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-xl font-black text-white">
+                    Eliminar cuenta
+                  </h2>
+
+                  <p className="mt-1.5 text-sm leading-6 text-slate-400">
+                    Esta acción es permanente. Solo se permite porque la
+                    cuenta no tiene movimientos registrados.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-7 py-6">
+              <div
+                className="
+                  rounded-2xl
+                  border
+                  border-red-500/20
+                  bg-red-500/[0.05]
+                  p-5
+                "
+              >
+                <p className="truncate text-lg font-black text-white">
+                  {cuentaParaEliminar.nombre}
+                </p>
+
+                <div className="mt-4 flex items-end justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                      Saldo actual
+                    </p>
+
+                    <p
+                      className={`
+                        mt-2
+                        text-2xl
+                        font-black
+                        ${
+                          Number(cuentaParaEliminar.saldo_actual) >= 0
+                            ? "text-emerald-300"
+                            : "text-red-300"
+                        }
+                      `}
+                    >
+                      S/ {formatearMonto(cuentaParaEliminar.saldo_actual)}
+                    </p>
+                  </div>
+
+                  <span className="rounded-lg border border-red-500/25 bg-red-500/10 px-2.5 py-1.5 text-xs font-bold text-red-300">
+                    0 movimientos
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-5 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] px-4 py-3">
+                <Icon name="alert" className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+                <p className="text-xs leading-5 text-slate-400">
+                  Después de eliminarla no podrás restaurarla.
+                </p>
+              </div>
+
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  disabled={Boolean(procesandoCuentaId)}
+                  onClick={() => setCuentaParaEliminar(null)}
+                  className="
+                    h-12
+                    flex-1
+                    rounded-xl
+                    border
+                    border-white/[0.10]
+                    bg-white/[0.05]
+                    px-5
+                    text-sm
+                    font-bold
+                    text-slate-300
+                    transition
+                    hover:bg-white/[0.09]
+                    disabled:cursor-not-allowed
+                    disabled:opacity-50
+                  "
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="button"
+                  disabled={Boolean(procesandoCuentaId)}
+                  onClick={confirmarEliminacion}
+                  className="
+                    flex
+                    h-12
+                    flex-1
+                    items-center
+                    justify-center
+                    gap-2
+                    rounded-xl
+                    border-2
+                    border-red-400/35
+                    bg-gradient-to-r
+                    from-red-700
+                    to-rose-600
+                    px-5
+                    text-sm
+                    font-black
+                    text-white
+                    transition
+                    hover:-translate-y-0.5
+                    hover:from-red-600
+                    hover:to-rose-500
+                    disabled:cursor-not-allowed
+                    disabled:opacity-60
+                  "
+                >
+                  {procesandoCuentaId === cuentaParaEliminar.id ? (
+                    <>
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                      Eliminando...
+                    </>
+                  ) : (
+                    <>
+                      <Icon name="trash" className="h-4 w-4" />
+                      Eliminar definitivamente
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* =====================================================
           MODAL EDITAR CUENTA
       ====================================================== */}
 
@@ -2829,7 +3198,8 @@ function Cuentas() {
             className="
               w-full
               max-w-lg
-              overflow-hidden
+              max-h-[calc(100vh-40px)]
+              overflow-y-auto
               rounded-[28px]
               border-2
               border-blue-500/25
@@ -2854,7 +3224,7 @@ function Cuentas() {
                 </h2>
 
                 <p className="mt-1 text-sm text-slate-400">
-                  Actualiza el nombre, tipo, color e icono.
+                  Actualiza los datos de la cuenta y su saldo inicial.
                 </p>
               </div>
 
@@ -2912,6 +3282,50 @@ function Cuentas() {
                   <option value="Billetera">Billetera</option>
                   <option value="Efectivo">Efectivo</option>
                 </select>
+              </div>
+
+              <div>
+                <div className="mb-2.5 flex items-center justify-between gap-3">
+                  <label className="text-sm font-semibold text-slate-300">
+                    Saldo inicial
+                  </label>
+
+                  <span
+                    className={`
+                      rounded-lg
+                      border
+                      px-2
+                      py-1
+                      text-[10px]
+                      font-black
+                      uppercase
+                      tracking-[0.08em]
+                      ${
+                        puedeEditarSaldoInicial
+                          ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+                          : "border-amber-500/25 bg-amber-500/10 text-amber-300"
+                      }
+                    `}
+                  >
+                    {puedeEditarSaldoInicial ? "Editable" : "Bloqueado"}
+                  </span>
+                </div>
+
+                <input
+                  type="number"
+                  step="0.01"
+                  value={saldoInicialEdit}
+                  disabled={!puedeEditarSaldoInicial}
+                  onChange={(e) => setSaldoInicialEdit(e.target.value)}
+                  placeholder="S/ 0.00"
+                  className={inputClass}
+                />
+
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  {puedeEditarSaldoInicial
+                    ? "Puedes corregirlo porque esta cuenta todavía no tiene movimientos."
+                    : "No se puede modificar porque cambiaría el historial y los saldos registrados."}
+                </p>
               </div>
 
               <div>
