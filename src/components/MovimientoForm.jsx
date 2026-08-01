@@ -1,6 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { supabase } from "../services/supabase";
+
+function normalizarMoneda(moneda) {
+  return moneda === "USD" ? "USD" : "PEN";
+}
+
+function getSimboloMoneda(moneda) {
+  return normalizarMoneda(moneda) === "USD" ? "$" : "S/";
+}
 
 function MovimientoForm({ onSaved }) {
   const [tipo, setTipo] = useState("GASTO");
@@ -18,6 +26,16 @@ function MovimientoForm({ onSaved }) {
     cargarCategorias();
     cargarCuentas();
   }, []);
+
+  const cuentaSeleccionada = useMemo(
+    () => cuentas.find((cuenta) => cuenta.id === cuentaId) || null,
+    [cuentas, cuentaId]
+  );
+
+  const monedaSeleccionada = normalizarMoneda(
+    cuentaSeleccionada?.moneda
+  );
+  const simboloSeleccionado = getSimboloMoneda(monedaSeleccionada);
 
   async function cargarCategorias() {
     const {
@@ -49,8 +67,9 @@ function MovimientoForm({ onSaved }) {
 
     const { data, error } = await supabase
       .from("cuentas")
-      .select("*")
+      .select("id,nombre,moneda,activo")
       .eq("usuario_id", user.id)
+      .or("activo.is.null,activo.eq.true")
       .order("nombre");
 
     if (error) {
@@ -75,14 +94,14 @@ function MovimientoForm({ onSaved }) {
 
     if (guardando) return;
 
-    if (!cuentaId) {
+    if (!cuentaId || !cuentaSeleccionada) {
       mostrarMensaje("Selecciona una cuenta", "error");
       return;
     }
 
     const valorMonto = Number(monto);
 
-    if (!valorMonto || valorMonto <= 0) {
+    if (!Number.isFinite(valorMonto) || valorMonto <= 0) {
       mostrarMensaje("Ingresa un monto válido", "error");
       return;
     }
@@ -96,43 +115,48 @@ function MovimientoForm({ onSaved }) {
       data: { user },
     } = await supabase.auth.getUser();
 
-    if (!user) return;
-
-    setGuardando(true);
-
-    const { error } = await supabase
-      .from("movimientos")
-      .insert({
-        usuario_id: user.id,
-        tipo,
-        monto: valorMonto,
-        categoria_id: categoriaId || null,
-        cuenta_id: cuentaId,
-        descripcion: descripcion.trim(),
-        fecha: new Date().toISOString(),
-      });
-
-    if (error) {
-      console.log(error);
-      setGuardando(false);
-      mostrarMensaje("Error guardando movimiento", "error");
+    if (!user) {
+      mostrarMensaje("Tu sesión terminó. Vuelve a iniciar sesión", "error");
       return;
     }
 
-    setMonto("");
-    setDescripcion("");
-    setCategoriaId("");
-    setCuentaId("");
-    setTipo("GASTO");
-    setGuardando(false);
+    setGuardando(true);
 
-    mostrarMensaje(
-      "Movimiento registrado correctamente",
-      "success"
-    );
+    try {
+      const { error } = await supabase
+        .from("movimientos")
+        .insert({
+          usuario_id: user.id,
+          tipo,
+          monto: Number(valorMonto.toFixed(2)),
+          categoria_id: categoriaId || null,
+          cuenta_id: cuentaId,
+          descripcion: descripcion.trim(),
+          fecha: new Date().toISOString(),
+        });
 
-    if (onSaved) {
-      await onSaved();
+      if (error) {
+        console.log(error);
+        mostrarMensaje("Error guardando movimiento", "error");
+        return;
+      }
+
+      setMonto("");
+      setDescripcion("");
+      setCategoriaId("");
+      setCuentaId("");
+      setTipo("GASTO");
+
+      mostrarMensaje(
+        "Movimiento registrado correctamente",
+        "success"
+      );
+
+      if (onSaved) {
+        await onSaved();
+      }
+    } finally {
+      setGuardando(false);
     }
   }
 
@@ -153,6 +177,8 @@ function MovimientoForm({ onSaved }) {
     focus:border-red-500/55
     focus:ring-2
     focus:ring-red-500/10
+    disabled:cursor-not-allowed
+    disabled:opacity-60
   `;
 
   return (
@@ -186,7 +212,7 @@ function MovimientoForm({ onSaved }) {
           </h2>
 
           <p className="mt-1.5 text-sm text-slate-400">
-            Registra un ingreso o gasto en tu cuenta.
+            Registra un ingreso o gasto en la moneda de la cuenta.
           </p>
         </div>
 
@@ -235,7 +261,11 @@ function MovimientoForm({ onSaved }) {
           <select
             id="movimiento-tipo"
             value={tipo}
-            onChange={(e) => setTipo(e.target.value)}
+            disabled={guardando}
+            onChange={(e) => {
+              setTipo(e.target.value);
+              setCategoriaId("");
+            }}
             className={`${fieldClass} bg-[#06090f]`}
           >
             <option value="GASTO">Gasto</option>
@@ -260,6 +290,7 @@ function MovimientoForm({ onSaved }) {
           <select
             id="movimiento-cuenta"
             value={cuentaId}
+            disabled={guardando}
             onChange={(e) => setCuentaId(e.target.value)}
             className={`${fieldClass} bg-[#06090f]`}
           >
@@ -267,10 +298,36 @@ function MovimientoForm({ onSaved }) {
 
             {cuentas.map((cuenta) => (
               <option key={cuenta.id} value={cuenta.id}>
-                {cuenta.nombre}
+                {cuenta.nombre} · {normalizarMoneda(cuenta.moneda)}
               </option>
             ))}
           </select>
+
+          {cuentaSeleccionada && (
+            <div
+              className="
+                mt-3
+                flex
+                items-center
+                justify-between
+                rounded-xl
+                border
+                border-blue-500/20
+                bg-blue-500/[0.06]
+                px-4
+                py-3
+                text-xs
+              "
+            >
+              <span className="font-semibold text-slate-400">
+                Moneda de la cuenta
+              </span>
+
+              <span className="font-black text-blue-300">
+                {monedaSeleccionada} · {simboloSeleccionado}
+              </span>
+            </div>
+          )}
         </div>
 
         <div>
@@ -290,6 +347,7 @@ function MovimientoForm({ onSaved }) {
           <select
             id="movimiento-categoria"
             value={categoriaId}
+            disabled={guardando}
             onChange={(e) => setCategoriaId(e.target.value)}
             className={`${fieldClass} bg-[#06090f]`}
           >
@@ -316,7 +374,7 @@ function MovimientoForm({ onSaved }) {
               text-slate-400
             "
           >
-            Monto (S/)
+            Monto ({simboloSeleccionado})
           </label>
 
           <input
@@ -324,9 +382,10 @@ function MovimientoForm({ onSaved }) {
             type="number"
             min="0"
             step="0.01"
+            disabled={guardando}
             value={monto}
             onChange={(e) => setMonto(e.target.value)}
-            placeholder="0.00"
+            placeholder={`${simboloSeleccionado} 0.00`}
             className={fieldClass}
           />
         </div>
@@ -348,6 +407,7 @@ function MovimientoForm({ onSaved }) {
           <input
             id="movimiento-descripcion"
             value={descripcion}
+            disabled={guardando}
             onChange={(e) => setDescripcion(e.target.value)}
             placeholder="Ej.: Pago de servicios"
             className={fieldClass}

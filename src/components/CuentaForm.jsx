@@ -1,365 +1,204 @@
 import { useState } from "react";
 import { supabase } from "../services/supabase";
 
+const MONEDAS = [
+  {
+    value: "PEN",
+    label: "Soles peruanos (PEN)",
+  },
+  {
+    value: "USD",
+    label: "Dólares estadounidenses (USD)",
+  },
+];
 
-function CuentaForm({actualizar}){
+function CuentaForm({ actualizar }) {
+  const [nombre, setNombre] = useState("");
+  const [tipo, setTipo] = useState("Billetera");
+  const [moneda, setMoneda] = useState("PEN");
+  const [saldo, setSaldo] = useState("");
+  const [mensaje, setMensaje] = useState("");
+  const [tipoMensaje, setTipoMensaje] = useState("success");
+  const [creando, setCreando] = useState(false);
 
+  function mostrarMensaje(texto, tipo = "success") {
+    setMensaje(texto);
+    setTipoMensaje(tipo);
 
-const [nombre,setNombre] = useState("");
+    window.setTimeout(() => {
+      setMensaje("");
+    }, 3500);
+  }
 
-const [tipo,setTipo] = useState("Billetera");
+  async function crearCuenta(e) {
+    e.preventDefault();
 
-const [saldo,setSaldo] = useState("");
+    if (creando) return;
 
-const [mensaje,setMensaje] = useState("");
+    if (!nombre.trim()) {
+      mostrarMensaje("Ingresa un nombre para la cuenta", "error");
+      return;
+    }
 
+    if (saldo === "") {
+      mostrarMensaje("Ingresa un saldo inicial", "error");
+      return;
+    }
 
+    const saldoInicial = Number(saldo);
 
+    if (!Number.isFinite(saldoInicial)) {
+      mostrarMensaje("Ingresa un saldo inicial válido", "error");
+      return;
+    }
 
+    if (!MONEDAS.some((opcion) => opcion.value === moneda)) {
+      mostrarMensaje("Selecciona una moneda válida", "error");
+      return;
+    }
 
+    setCreando(true);
 
-async function crearCuenta(e){
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
+      if (!user) {
+        mostrarMensaje("No hay una sesión activa", "error");
+        return;
+      }
 
-e.preventDefault();
+      const { error } = await supabase.from("cuentas").insert({
+        usuario_id: user.id,
+        nombre: nombre.trim(),
+        tipo,
+        moneda,
+        saldo_inicial: saldoInicial,
+        saldo_actual: saldoInicial,
+        color: "#E60000",
+      });
 
+      if (error) {
+        console.log(error);
+        mostrarMensaje("No se pudo crear la cuenta", "error");
+        return;
+      }
 
+      setNombre("");
+      setTipo("Billetera");
+      setMoneda("PEN");
+      setSaldo("");
 
+      mostrarMensaje("Cuenta creada correctamente");
 
+      if (typeof actualizar === "function") {
+        await actualizar();
+      }
+    } finally {
+      setCreando(false);
+    }
+  }
 
-if(!nombre.trim()){
+  return (
+    <form
+      onSubmit={crearCuenta}
+      className="mt-8 max-w-md rounded-xl border border-red-900 bg-zinc-900 p-5"
+    >
+      <h2 className="mb-4 text-2xl font-bold text-red-600">
+        Nueva cuenta
+      </h2>
 
+      <div>
+        <label className="mb-2 block text-sm font-semibold text-slate-300">
+          Nombre de cuenta
+        </label>
 
-setMensaje("Ingresa un nombre para la cuenta");
+        <input
+          className="mb-3 w-full rounded border border-red-900 bg-black p-3 text-white"
+          placeholder="Ej. BCP, Yape o Binance"
+          value={nombre}
+          disabled={creando}
+          onChange={(e) => setNombre(e.target.value)}
+        />
+      </div>
 
-return;
+      <div>
+        <label className="mb-2 block text-sm font-semibold text-slate-300">
+          Tipo
+        </label>
 
+        <select
+          className="mb-3 w-full rounded border border-red-900 bg-black p-3 text-white"
+          value={tipo}
+          disabled={creando}
+          onChange={(e) => setTipo(e.target.value)}
+        >
+          <option value="Billetera">Billetera</option>
+          <option value="Banco">Banco</option>
+          <option value="Efectivo">Efectivo</option>
+        </select>
+      </div>
 
+      <div>
+        <label className="mb-2 block text-sm font-semibold text-slate-300">
+          Moneda
+        </label>
+
+        <select
+          className="mb-3 w-full rounded border border-red-900 bg-black p-3 text-white"
+          value={moneda}
+          disabled={creando}
+          onChange={(e) => setMoneda(e.target.value)}
+        >
+          {MONEDAS.map((opcion) => (
+            <option key={opcion.value} value={opcion.value}>
+              {opcion.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="mb-2 block text-sm font-semibold text-slate-300">
+          Saldo inicial
+        </label>
+
+        <input
+          className="mb-3 w-full rounded border border-red-900 bg-black p-3 text-white"
+          placeholder={moneda === "USD" ? "US$ 0.00" : "S/ 0.00"}
+          type="number"
+          step="0.01"
+          value={saldo}
+          disabled={creando}
+          onChange={(e) => setSaldo(e.target.value)}
+        />
+
+        <p className="mb-4 text-xs leading-5 text-slate-500">
+          Este monto representa el dinero disponible en la moneda seleccionada
+          antes de registrar movimientos.
+        </p>
+      </div>
+
+      <button
+        type="submit"
+        disabled={creando}
+        className="w-full rounded bg-red-700 py-3 font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {creando ? "Creando cuenta..." : "Crear cuenta"}
+      </button>
+
+      {mensaje && (
+        <p
+          className={`mt-4 text-sm font-semibold ${
+            tipoMensaje === "error" ? "text-red-400" : "text-green-500"
+          }`}
+        >
+          {mensaje}
+        </p>
+      )}
+    </form>
+  );
 }
-
-
-
-
-
-if(saldo===""){
-
-
-setMensaje("Ingresa un saldo inicial");
-
-return;
-
-
-}
-
-
-
-
-
-
-const {data:{user}} = await supabase.auth.getUser();
-
-
-
-
-
-if(!user){
-
-setMensaje("No hay sesión activa");
-
-return;
-
-}
-
-
-
-
-
-
-
-
-const {error}= await supabase
-.from("cuentas")
-.insert({
-
-usuario_id:user.id,
-
-nombre:nombre,
-
-tipo:tipo,
-
-saldo_inicial:Number(saldo),
-
-saldo_actual:Number(saldo),
-
-color:"#00FF00"
-
-});
-
-
-
-
-
-
-
-if(error){
-
-
-console.log(error);
-
-setMensaje("Error al crear cuenta");
-
-return;
-
-
-}
-
-
-
-
-
-
-
-setNombre("");
-
-setSaldo("");
-
-setTipo("Billetera");
-
-
-
-setMensaje("Cuenta creada correctamente");
-
-
-
-
-
-actualizar();
-
-
-
-
-
-
-setTimeout(()=>{
-
-
-setMensaje("");
-
-},3000);
-
-
-
-
-
-}
-return (
-
-<form
-
-onSubmit={crearCuenta}
-
-className="
-border
-border-red-900
-bg-zinc-900
-p-5
-rounded-xl
-mt-8
-max-w-md
-"
-
->
-
-
-
-<h2 className="
-text-2xl
-text-red-600
-font-bold
-mb-4
-">
-
-Nueva cuenta
-
-</h2>
-
-
-
-
-
-
-
-<input
-
-className="
-w-full
-mb-3
-p-3
-bg-black
-border
-border-red-900
-text-white
-rounded
-"
-
-placeholder="Nombre de cuenta"
-
-value={nombre}
-
-onChange={(e)=>setNombre(e.target.value)}
-
-/>
-
-
-
-
-
-
-
-
-<select
-
-className="
-w-full
-mb-3
-p-3
-bg-black
-border
-border-red-900
-text-white
-rounded
-"
-
-value={tipo}
-
-onChange={(e)=>setTipo(e.target.value)}
-
->
-
-
-
-<option value="Billetera">
-
-Billetera
-
-</option>
-
-
-
-
-<option value="Banco">
-
-Banco
-
-</option>
-
-
-
-
-
-<option value="Efectivo">
-
-Efectivo
-
-</option>
-
-
-
-
-</select>
-
-
-
-
-
-
-
-
-
-<input
-
-className="
-w-full
-mb-3
-p-3
-bg-black
-border
-border-red-900
-text-white
-rounded
-"
-
-placeholder="Saldo inicial"
-
-type="number"
-
-value={saldo}
-
-onChange={(e)=>setSaldo(e.target.value)}
-
-/>
-
-
-
-
-
-
-
-
-
-<button
-
-className="
-w-full
-bg-red-700
-py-3
-rounded
-font-bold
-text-white
-"
-
->
-
-Crear cuenta
-
-</button>
-
-
-
-
-
-
-
-{
-
-mensaje && (
-
-<p className="
-mt-4
-text-green-500
-">
-
-{mensaje}
-
-</p>
-
-
-)
-
-}
-
-
-
-
-
-
-
-</form>
-
-)
-
-
-}
-
 
 export default CuentaForm;

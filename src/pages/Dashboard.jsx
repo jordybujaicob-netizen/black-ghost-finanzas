@@ -1,7 +1,9 @@
+// BLACK GHOST DASHBOARD MULTIMONEDA — PEN / USD
 import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -26,6 +28,22 @@ const FILTROS = [
   ["mes", "Mes"],
   ["año", "Año"],
 ];
+
+const MONEDAS = [
+  {
+    codigo: "PEN",
+    etiqueta: "Soles",
+    simbolo: "S/",
+  },
+  {
+    codigo: "USD",
+    etiqueta: "Dólares",
+    simbolo: "$",
+  },
+];
+
+const CLAVE_MONEDA_DASHBOARD =
+  "black-ghost-dashboard-moneda";
 
 
 function Icon({
@@ -588,6 +606,57 @@ function formatearRelacion(relacion) {
   }
 
   return relacion || null;
+}
+
+
+function normalizarMoneda(valor) {
+  return String(valor || "PEN")
+    .trim()
+    .toUpperCase() === "USD"
+    ? "USD"
+    : "PEN";
+}
+
+
+function simboloMoneda(moneda) {
+  return normalizarMoneda(moneda) === "USD"
+    ? "$"
+    : "S/";
+}
+
+
+function formatearDinero(
+  valor,
+  moneda = "PEN"
+) {
+  const numero = Number(valor || 0);
+
+  const monto = new Intl.NumberFormat(
+    "es-PE",
+    {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }
+  ).format(
+    Number.isFinite(numero)
+      ? numero
+      : 0
+  );
+
+  return `${simboloMoneda(moneda)} ${monto}`;
+}
+
+
+function obtenerMonedaMovimiento(
+  movimiento
+) {
+  const cuenta = formatearRelacion(
+    movimiento?.cuentas
+  );
+
+  return normalizarMoneda(
+    cuenta?.moneda
+  );
 }
 
 
@@ -1161,7 +1230,19 @@ function Dashboard() {
   ] = useState([]);
 
   const [moneda, setMoneda] =
-    useState("PEN");
+    useState(() => {
+      const monedaGuardada =
+        window.localStorage.getItem(
+          CLAVE_MONEDA_DASHBOARD
+        );
+
+      return normalizarMoneda(
+        monedaGuardada
+      );
+    });
+
+  const monedaInicializada =
+    useRef(false);
 
   const [filtro, setFiltro] =
     useState("mes");
@@ -1242,6 +1323,7 @@ function Dashboard() {
               .from("movimientos")
               .select(`
                 id,
+                cuenta_id,
                 tipo,
                 monto,
                 descripcion,
@@ -1253,7 +1335,8 @@ function Dashboard() {
                   color
                 ),
                 cuentas(
-                  nombre
+                  nombre,
+                  moneda
                 )
               `)
               .eq(
@@ -1326,11 +1409,31 @@ function Dashboard() {
             ""
           );
 
-          setMoneda(
-            resultadoPerfil.data
-              ?.moneda_principal ||
-            "PEN"
-          );
+          if (
+            !monedaInicializada.current
+          ) {
+            const monedaGuardada =
+              window.localStorage.getItem(
+                CLAVE_MONEDA_DASHBOARD
+              );
+
+            const monedaInicial =
+              monedaGuardada
+                ? normalizarMoneda(
+                    monedaGuardada
+                  )
+                : normalizarMoneda(
+                    resultadoPerfil.data
+                      ?.moneda_principal
+                  );
+
+            setMoneda(
+              monedaInicial
+            );
+
+            monedaInicializada.current =
+              true;
+          }
         } catch (errorCarga) {
           console.error(
             "Error cargando dashboard:",
@@ -1509,23 +1612,36 @@ function Dashboard() {
     );
 
 
-  const movimientosReales =
+  const movimientosMonedaSeleccionada =
     useMemo(
       () =>
         movimientos.filter(
+          (movimiento) =>
+            obtenerMonedaMovimiento(
+              movimiento
+            ) === moneda
+        ),
+      [movimientos, moneda]
+    );
+
+
+  const movimientosReales =
+    useMemo(
+      () =>
+        movimientosMonedaSeleccionada.filter(
           (movimiento) =>
             !esTransferencia(
               movimiento
             )
         ),
-      [movimientos]
+      [movimientosMonedaSeleccionada]
     );
 
 
   const movimientosFiltrados =
     useMemo(
       () =>
-        movimientos.filter(
+        movimientosMonedaSeleccionada.filter(
           (movimiento) =>
             movimientoEnRango(
               movimiento,
@@ -1534,7 +1650,7 @@ function Dashboard() {
             )
         ),
       [
-        movimientos,
+        movimientosMonedaSeleccionada,
         periodo,
       ]
     );
@@ -1599,25 +1715,76 @@ function Dashboard() {
     );
 
 
+  /*
+    El patrimonio se calcula desde el saldo inicial y todos los
+    movimientos de cada cuenta. No usamos cuentas.saldo_actual
+    porque ese campo puede quedar desactualizado cuando se registra
+    un ingreso o gasto directamente en la tabla movimientos.
+  */
+
   const patrimonioActual =
     useMemo(() => {
+      const variacionPorCuenta =
+        movimientos.reduce(
+          (acumulado, movimiento) => {
+            const cuentaId =
+              movimiento.cuenta_id;
+
+            if (!cuentaId) {
+              return acumulado;
+            }
+
+            const monto = Number(
+              movimiento.monto || 0
+            );
+
+            const variacion =
+              movimiento.tipo === "INGRESO"
+                ? monto
+                : movimiento.tipo === "GASTO"
+                  ? -monto
+                  : 0;
+
+            acumulado[cuentaId] =
+              Number(
+                acumulado[cuentaId] || 0
+              ) + variacion;
+
+            return acumulado;
+          },
+          {}
+        );
+
       return cuentas
         .filter(
           (cuenta) =>
             cuenta.activo !== false &&
-            !cuenta.archivado_en
+            !cuenta.archivado_en &&
+            normalizarMoneda(
+              cuenta.moneda
+            ) === moneda
         )
         .reduce(
-          (total, cuenta) =>
-            total +
-            Number(
-              cuenta.saldo_actual ??
-              cuenta.saldo_inicial ??
-              0
-            ),
+          (total, cuenta) => {
+            const saldoInicial = Number(
+              cuenta.saldo_inicial || 0
+            );
+
+            const variacion = Number(
+              variacionPorCuenta[cuenta.id] || 0
+            );
+
+            return total +
+              saldoInicial +
+              variacion;
+          },
           0
         );
-    }, [cuentas]);
+    }, [
+      cuentas,
+      movimientos,
+      moneda,
+    ]);
 
 
   const gastosCategoria =
@@ -1733,8 +1900,26 @@ function Dashboard() {
     const datosBloques =
       periodo.bloques.map(
         (bloque) => {
-          const movimientosBloque =
+          /*
+            Ingresos y gastos excluyen transferencias. El patrimonio,
+            en cambio, sí considera todas las entradas y salidas de la
+            moneda seleccionada. Así una conversión USD → PEN reduce
+            el patrimonio USD y aumenta el patrimonio PEN sin tratarla
+            como ingreso o gasto real.
+          */
+
+          const movimientosRealesBloque =
             movimientosReales.filter(
+              (movimiento) =>
+                movimientoEnRango(
+                  movimiento,
+                  bloque.inicio,
+                  bloque.fin
+                )
+            );
+
+          const movimientosPatrimonioBloque =
+            movimientosMonedaSeleccionada.filter(
               (movimiento) =>
                 movimientoEnRango(
                   movimiento,
@@ -1745,13 +1930,13 @@ function Dashboard() {
 
           const ingresos =
             sumarMovimientos(
-              movimientosBloque,
+              movimientosRealesBloque,
               "INGRESO"
             );
 
           const gastos =
             sumarMovimientos(
-              movimientosBloque,
+              movimientosRealesBloque,
               "GASTO"
             );
 
@@ -1762,16 +1947,17 @@ function Dashboard() {
             ingresos,
             gastos,
 
-            neto:
-              ingresos -
-              gastos,
+            variacionPatrimonio:
+              calcularMovimientoNeto(
+                movimientosPatrimonioBloque
+              ),
           };
         }
       );
 
 
     const movimientosDesdeInicio =
-      movimientosReales.filter(
+      movimientosMonedaSeleccionada.filter(
         (movimiento) =>
           convertirFechaMovimiento(
             movimiento
@@ -1832,7 +2018,7 @@ function Dashboard() {
     datosBloques.forEach(
       (bloque) => {
         patrimonioAcumulado +=
-          bloque.neto;
+          bloque.variacionPatrimonio;
 
         patrimonio.push({
           fecha:
@@ -1880,6 +2066,7 @@ function Dashboard() {
     filtro,
     periodo,
     movimientosReales,
+    movimientosMonedaSeleccionada,
     patrimonioActual,
   ]);
 
@@ -1993,32 +2180,32 @@ function Dashboard() {
 
 
   function formatearMoneda(
-    valor
+    valor,
+    monedaObjetivo = moneda
   ) {
-    try {
-      return new Intl.NumberFormat(
-        "es-PE",
-        {
-          style:
-            "currency",
+    return formatearDinero(
+      valor,
+      monedaObjetivo
+    );
+  }
 
-          currency:
-            moneda,
 
-          minimumFractionDigits:
-            2,
-
-          maximumFractionDigits:
-            2,
-        }
-      ).format(
-        Number(valor || 0)
+  function cambiarMoneda(
+    nuevaMoneda
+  ) {
+    const monedaNormalizada =
+      normalizarMoneda(
+        nuevaMoneda
       );
-    } catch {
-      return `S/ ${Number(
-        valor || 0
-      ).toFixed(2)}`;
-    }
+
+    setMoneda(
+      monedaNormalizada
+    );
+
+    window.localStorage.setItem(
+      CLAVE_MONEDA_DASHBOARD,
+      monedaNormalizada
+    );
   }
 
 
@@ -2284,6 +2471,68 @@ function Dashboard() {
                 lg:justify-end
               "
             >
+              <div
+                className="
+                  flex
+                  h-[47px]
+                  overflow-hidden
+                  rounded-[13px]
+                  border
+                  border-white/[0.09]
+                  bg-black/30
+                "
+                aria-label="Moneda del análisis"
+              >
+                {MONEDAS.map(
+                  (opcion) => (
+                    <button
+                      key={opcion.codigo}
+                      type="button"
+                      onClick={() =>
+                        cambiarMoneda(
+                          opcion.codigo
+                        )
+                      }
+                      className={`
+                        flex
+                        min-w-[112px]
+                        items-center
+                        justify-center
+                        gap-2
+                        px-4
+                        text-[10px]
+                        font-black
+                        uppercase
+                        tracking-[0.08em]
+                        transition
+
+                        ${
+                          moneda === opcion.codigo
+                            ? "bg-red-500/14 text-red-200"
+                            : "text-slate-500 hover:bg-white/[0.035] hover:text-white"
+                        }
+
+                        ${
+                          opcion.codigo === "USD"
+                            ? "border-l border-white/[0.08]"
+                            : ""
+                        }
+                      `}
+                      title={`Analizar en ${opcion.etiqueta}`}
+                    >
+                      <span className="text-sm">
+                        {opcion.simbolo}
+                      </span>
+
+                      <span>
+                        {opcion.codigo}
+                      </span>
+                    </button>
+                  )
+                )}
+              </div>
+
+
               <div className="dashboard-filter">
                 {FILTROS.map(
                   ([valor, texto]) => (
@@ -2459,8 +2708,8 @@ function Dashboard() {
               />
             }
             color="red"
-            subtitle="Saldo total de cuentas activas"
-            badge="Actual"
+            subtitle={`Saldo de cuentas activas en ${moneda}`}
+            badge={moneda}
             trend={{
               value:
                 comparaciones.patrimonio,
@@ -2482,8 +2731,8 @@ function Dashboard() {
               />
             }
             color="green"
-            subtitle="Ingresos reales del periodo"
-            badge="Periodo"
+            subtitle={`Ingresos reales en ${moneda}`}
+            badge={moneda}
             trend={{
               value:
                 comparaciones.ingresos,
@@ -2505,8 +2754,8 @@ function Dashboard() {
               />
             }
             color="orange"
-            subtitle="Transferencias excluidas"
-            badge="Periodo"
+            subtitle={`Transferencias excluidas · ${moneda}`}
+            badge={moneda}
             trend={{
               value:
                 comparaciones.gastos,
@@ -2532,7 +2781,7 @@ function Dashboard() {
                 ? "purple"
                 : "red"
             }
-            subtitle="Ingresos menos gastos"
+            subtitle={`Ingresos menos gastos en ${moneda}`}
             badge={
               resumen.ahorro >= 0
                 ? "Positivo"
@@ -2659,8 +2908,8 @@ function Dashboard() {
               </p>
 
               <p className="mt-1 text-xs leading-5 text-slate-400">
-                Los gráficos mostrarán valores en cero y el
-                patrimonio permanecerá constante hasta que
+                Los gráficos mostrarán valores en cero para {moneda} y el
+                patrimonio de esta moneda permanecerá constante hasta que
                 registres nuevos movimientos.
               </p>
             </div>

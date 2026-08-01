@@ -1,3 +1,4 @@
+// BLACK GHOST CUENTAS MULTIMONEDA V2 — PEN/USD + TIPO DE CAMBIO MANUAL
 import { useEffect, useMemo, useState } from "react";
 
 import { supabase } from "../services/supabase";
@@ -250,6 +251,45 @@ const accountIconOptions = [
   "💼",
 ];
 
+const currencyOptions = [
+  {
+    value: "PEN",
+    label: "Soles peruanos",
+    shortLabel: "Soles",
+    code: "PEN",
+  },
+  {
+    value: "USD",
+    label: "Dólares estadounidenses",
+    shortLabel: "Dólares",
+    code: "USD",
+  },
+];
+
+function normalizarMoneda(moneda) {
+  return moneda === "USD" ? "USD" : "PEN";
+}
+
+function getCurrencyInfo(moneda) {
+  const value = normalizarMoneda(moneda);
+
+  return (
+    currencyOptions.find((opcion) => opcion.value === value) ||
+    currencyOptions[0]
+  );
+}
+
+function formatearDinero(valor, moneda = "PEN") {
+  const monedaNormalizada = normalizarMoneda(moneda);
+  const simbolo = monedaNormalizada === "USD" ? "$" : "S/";
+  const monto = Number(valor || 0).toLocaleString("es-PE", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  return `${simbolo} ${monto}`;
+}
+
 function isHexColor(value) {
   return /^#[0-9a-fA-F]{6}$/.test(value || "");
 }
@@ -300,6 +340,26 @@ function getRpcErrorMessage(error) {
 
   if (detail.includes("CUENTAS_IGUALES")) {
     return "La cuenta de origen y destino deben ser diferentes";
+  }
+
+  if (detail.includes("TIPO_CAMBIO_REQUERIDO")) {
+    return "Ingresa el tipo de cambio para convertir entre soles y dólares";
+  }
+
+  if (detail.includes("TIPO_CAMBIO_INVALIDO")) {
+    return "Ingresa un tipo de cambio válido mayor que cero";
+  }
+
+  if (detail.includes("CONVERSION_INVALIDA")) {
+    return "No se pudo calcular el monto convertido";
+  }
+
+  if (detail.includes("MONEDAS_NO_SOPORTADAS")) {
+    return "La combinación de monedas seleccionada no está disponible";
+  }
+
+  if (detail.includes("MONEDAS_DIFERENTES")) {
+    return "Actualiza la función de transferencias para habilitar conversiones entre PEN y USD";
   }
 
   if (detail.includes("MONTO_INVALIDO")) {
@@ -439,6 +499,8 @@ function Cuentas() {
   const [colorEdit, setColorEdit] = useState("#2563EB");
   const [iconoEdit, setIconoEdit] = useState("💳");
   const [saldoInicialEdit, setSaldoInicialEdit] = useState("");
+  const [monedaEdit, setMonedaEdit] = useState("PEN");
+  const [monedaResumen, setMonedaResumen] = useState("PEN");
 
   const [cuentaParaArchivar, setCuentaParaArchivar] = useState(null);
   const [cuentaParaEliminar, setCuentaParaEliminar] = useState(null);
@@ -450,9 +512,6 @@ function Cuentas() {
   const [totalIngresos, setTotalIngresos] = useState(0);
   const [totalGastos, setTotalGastos] = useState(0);
 
-  const [totalDinero, setTotalDinero] = useState(0);
-  const [cuentaMayor, setCuentaMayor] = useState(null);
-
   const [cargando, setCargando] = useState(true);
   const [transfiriendo, setTransfiriendo] = useState(false);
 
@@ -463,6 +522,12 @@ function Cuentas() {
     origen: "",
     destino: "",
     monto: "",
+  });
+  const [tipoCambio, setTipoCambio] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return window.localStorage.getItem(
+      "black-ghost-tipo-cambio-usd-pen"
+    ) || "";
   });
 
   useEffect(() => {
@@ -481,17 +546,53 @@ function Cuentas() {
     setCuentasFiltradas(lista);
   }, [cuentas, busqueda]);
 
-  const cuentaMenor = useMemo(() => {
-    if (!cuentas.length) return null;
+  useEffect(() => {
+    if (!cuentas.length) return;
 
-    return [...cuentas].sort(
-      (a, b) => Number(a.saldo_actual) - Number(b.saldo_actual)
-    )[0];
-  }, [cuentas]);
+    const existeMonedaSeleccionada = cuentas.some(
+      (cuenta) => normalizarMoneda(cuenta.moneda) === monedaResumen
+    );
+
+    if (!existeMonedaSeleccionada) {
+      setMonedaResumen(normalizarMoneda(cuentas[0].moneda));
+    }
+  }, [cuentas, monedaResumen]);
 
   const totalCuentas = cuentas.length + cuentasArchivadas.length;
   const puedeEditarSaldoInicial =
     editando?.cantidad_movimientos === 0;
+
+  const cuentasPorMoneda = useMemo(() => {
+    return {
+      PEN: cuentas.filter(
+        (cuenta) => normalizarMoneda(cuenta.moneda) === "PEN"
+      ),
+      USD: cuentas.filter(
+        (cuenta) => normalizarMoneda(cuenta.moneda) === "USD"
+      ),
+    };
+  }, [cuentas]);
+
+  const totalesPorMoneda = useMemo(() => {
+    return cuentas.reduce(
+      (totales, cuenta) => {
+        const moneda = normalizarMoneda(cuenta.moneda);
+        totales[moneda] += Number(cuenta.saldo_actual || 0);
+        return totales;
+      },
+      { PEN: 0, USD: 0 }
+    );
+  }, [cuentas]);
+
+  const cuentasResumen = cuentasPorMoneda[monedaResumen] || [];
+
+  const totalAbsolutoResumen = useMemo(() => {
+    return cuentasResumen.reduce(
+      (total, cuenta) =>
+        total + Math.abs(Number(cuenta.saldo_actual || 0)),
+      0
+    );
+  }, [cuentasResumen]);
 
   const cuentaOrigenSeleccionada = useMemo(
     () =>
@@ -501,23 +602,84 @@ function Cuentas() {
     [cuentas, transferencia.origen]
   );
 
-  const totalAbsoluto = useMemo(() => {
-    return cuentas.reduce(
-      (total, cuenta) => total + Math.abs(Number(cuenta.saldo_actual || 0)),
-      0
+  const cuentaDestinoSeleccionada = useMemo(
+    () =>
+      cuentas.find(
+        (cuenta) => cuenta.id === transferencia.destino
+      ) || null,
+    [cuentas, transferencia.destino]
+  );
+
+  const cuentasDestinoDisponibles = useMemo(() => {
+    if (!cuentaOrigenSeleccionada) return [];
+
+    return cuentas.filter(
+      (cuenta) => cuenta.id !== cuentaOrigenSeleccionada.id
     );
-  }, [cuentas]);
+  }, [cuentas, cuentaOrigenSeleccionada]);
+
+  const requiereConversion = Boolean(
+    cuentaOrigenSeleccionada &&
+      cuentaDestinoSeleccionada &&
+      normalizarMoneda(cuentaOrigenSeleccionada.moneda) !==
+        normalizarMoneda(cuentaDestinoSeleccionada.moneda)
+  );
+
+  const montoDestinoCalculado = useMemo(() => {
+    if (!cuentaOrigenSeleccionada || !cuentaDestinoSeleccionada) {
+      return 0;
+    }
+
+    const montoOrigen = Number(transferencia.monto);
+
+    if (!Number.isFinite(montoOrigen) || montoOrigen <= 0) {
+      return 0;
+    }
+
+    const monedaOrigen = normalizarMoneda(
+      cuentaOrigenSeleccionada.moneda
+    );
+    const monedaDestino = normalizarMoneda(
+      cuentaDestinoSeleccionada.moneda
+    );
+
+    if (monedaOrigen === monedaDestino) {
+      return Number(montoOrigen.toFixed(2));
+    }
+
+    const cambio = Number(tipoCambio);
+
+    if (!Number.isFinite(cambio) || cambio <= 0) {
+      return 0;
+    }
+
+    if (monedaOrigen === "USD" && monedaDestino === "PEN") {
+      return Number((montoOrigen * cambio).toFixed(2));
+    }
+
+    if (monedaOrigen === "PEN" && monedaDestino === "USD") {
+      return Number((montoOrigen / cambio).toFixed(2));
+    }
+
+    return 0;
+  }, [
+    cuentaOrigenSeleccionada,
+    cuentaDestinoSeleccionada,
+    transferencia.monto,
+    tipoCambio,
+  ]);
 
   const donutBackground = useMemo(() => {
-    if (!cuentas.length || totalAbsoluto === 0) {
+    if (!cuentasResumen.length || totalAbsolutoResumen === 0) {
       return "conic-gradient(#1f2937 0deg 360deg)";
     }
 
     let acumulado = 0;
 
-    const partes = cuentas.map((cuenta, index) => {
+    const partes = cuentasResumen.map((cuenta, index) => {
       const porcentaje =
-        Math.abs(Number(cuenta.saldo_actual || 0)) / totalAbsoluto;
+        Math.abs(Number(cuenta.saldo_actual || 0)) /
+        totalAbsolutoResumen;
 
       const inicio = acumulado * 360;
       acumulado += porcentaje;
@@ -527,7 +689,7 @@ function Cuentas() {
     });
 
     return `conic-gradient(${partes.join(", ")})`;
-  }, [cuentas, totalAbsoluto]);
+  }, [cuentasResumen, totalAbsolutoResumen]);
 
   function mostrarMensaje(texto, tipo = "success") {
     setMensaje(texto);
@@ -539,7 +701,7 @@ function Cuentas() {
   }
 
   function actualizar() {
-    cargarCuentas();
+    return cargarCuentas();
   }
 
   async function cargarCuentas(mostrarCarga = true) {
@@ -591,6 +753,7 @@ function Cuentas() {
 
           return {
             ...cuenta,
+            moneda: normalizarMoneda(cuenta.moneda),
             saldo_actual: saldo,
             cantidad_movimientos: errorMov
               ? null
@@ -613,14 +776,6 @@ function Cuentas() {
           return fechaB - fechaA;
         });
 
-      const total = activas.reduce(
-        (acumulado, cuenta) =>
-          acumulado + Number(cuenta.saldo_actual || 0),
-        0
-      );
-
-      setTotalDinero(total);
-      setCuentaMayor(activas[0] || null);
       setCuentas(activas);
       setCuentasArchivadas(archivadas);
     } finally {
@@ -637,6 +792,7 @@ function Cuentas() {
     );
     setIconoEdit(cuenta.icono?.trim() || "💳");
     setSaldoInicialEdit(String(Number(cuenta.saldo_inicial || 0)));
+    setMonedaEdit(normalizarMoneda(cuenta.moneda));
   }
 
   async function guardarEdicion(e) {
@@ -704,6 +860,7 @@ function Cuentas() {
       }
 
       cambios.saldo_inicial = saldoInicial;
+      cambios.moneda = normalizarMoneda(monedaEdit);
     }
 
     const { error } = await supabase
@@ -724,6 +881,7 @@ function Cuentas() {
     setColorEdit("#2563EB");
     setIconoEdit("💳");
     setSaldoInicialEdit("");
+    setMonedaEdit("PEN");
 
     mostrarMensaje("Cuenta actualizada correctamente");
     cargarCuentas(false);
@@ -873,19 +1031,53 @@ function Cuentas() {
     const cuentaOrigen = cuentas.find(
       (cuenta) => cuenta.id === origen
     );
+    const cuentaDestino = cuentas.find(
+      (cuenta) => cuenta.id === destino
+    );
 
-    if (!cuentaOrigen) {
-      mostrarMensaje("La cuenta de origen no está disponible", "error");
+    if (!cuentaOrigen || !cuentaDestino) {
+      mostrarMensaje("Una de las cuentas no está disponible", "error");
+      return;
+    }
+
+    const monedaOrigen = normalizarMoneda(cuentaOrigen.moneda);
+    const monedaDestino = normalizarMoneda(cuentaDestino.moneda);
+    const conversionNecesaria = monedaOrigen !== monedaDestino;
+    const cambio = Number(tipoCambio);
+
+    if (
+      conversionNecesaria &&
+      (!Number.isFinite(cambio) || cambio <= 0)
+    ) {
+      mostrarMensaje(
+        "Ingresa un tipo de cambio válido. Ejemplo: 3.60",
+        "error"
+      );
       return;
     }
 
     if (Number(cuentaOrigen.saldo_actual || 0) < cantidad) {
       mostrarMensaje(
-        `Saldo insuficiente. Disponible: S/ ${formatearMonto(
-          cuentaOrigen.saldo_actual
+        `Saldo insuficiente. Disponible: ${formatearDinero(
+          cuentaOrigen.saldo_actual,
+          cuentaOrigen.moneda
         )}`,
         "error"
       );
+      return;
+    }
+
+    let montoRecibido = cantidad;
+
+    if (conversionNecesaria) {
+      montoRecibido =
+        monedaOrigen === "USD"
+          ? Number((cantidad * cambio).toFixed(2))
+          : Number((cantidad / cambio).toFixed(2));
+    }
+
+    if (!Number.isFinite(montoRecibido) || montoRecibido <= 0) {
+      mostrarMensaje("No se pudo calcular el monto convertido", "error");
       return;
     }
 
@@ -898,6 +1090,7 @@ function Cuentas() {
           p_cuenta_origen: origen,
           p_cuenta_destino: destino,
           p_monto: cantidad,
+          p_tipo_cambio: conversionNecesaria ? cambio : null,
         }
       );
 
@@ -918,10 +1111,17 @@ function Cuentas() {
           ? transferenciaId.slice(0, 8).toUpperCase()
           : "";
 
+      const detalleConversion = conversionNecesaria
+        ? ` · ${formatearDinero(
+            cantidad,
+            monedaOrigen
+          )} → ${formatearDinero(montoRecibido, monedaDestino)}`
+        : "";
+
       mostrarMensaje(
         referencia
-          ? `Transferencia realizada · Ref. ${referencia}`
-          : "Transferencia realizada correctamente"
+          ? `Transferencia realizada${detalleConversion} · Ref. ${referencia}`
+          : `Transferencia realizada correctamente${detalleConversion}`
       );
 
       await cargarCuentas(false);
@@ -998,13 +1198,7 @@ function Cuentas() {
     setColorEdit("#2563EB");
     setIconoEdit("💳");
     setSaldoInicialEdit("");
-  }
-
-  function formatearMonto(valor) {
-    return Number(valor || 0).toLocaleString("es-PE", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+    setMonedaEdit("PEN");
   }
 
   function formatearFecha(fecha) {
@@ -1141,104 +1335,64 @@ function Cuentas() {
           "
         >
           <div className="flex items-center gap-4">
-            <div
-              className="
-                flex
-                h-12
-                w-12
-                shrink-0
-                items-center
-                justify-center
-                rounded-2xl
-                border-2
-                border-red-500/30
-                bg-red-500/12
-                text-red-300
-              "
-            >
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border-2 border-red-500/30 bg-red-500/12 text-red-300">
               <Icon name="wallet" />
             </div>
 
             <div className="min-w-0">
-              <p
-                className="
-                  text-[11px]
-                  font-bold
-                  uppercase
-                  tracking-[0.13em]
-                  text-slate-400
-                "
-              >
-                Dinero total
+              <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-400">
+                Patrimonio en soles
               </p>
 
               <p
-                className={`
-                  mt-2
-                  text-[22px]
-                  font-black
-                  tracking-tight
-                  ${
-                    totalDinero >= 0
-                      ? "text-emerald-300"
-                      : "text-red-300"
-                  }
-                `}
+                className={`mt-2 text-[22px] font-black tracking-tight ${
+                  totalesPorMoneda.PEN >= 0
+                    ? "text-emerald-300"
+                    : "text-red-300"
+                }`}
               >
-                S/ {formatearMonto(totalDinero)}
+                {formatearDinero(totalesPorMoneda.PEN, "PEN")}
               </p>
 
-              <span
-                className={`
-                  mt-2
-                  inline-flex
-                  rounded-lg
-                  border
-                  px-2
-                  py-1
-                  text-[10px]
-                  font-bold
-                  ${
-                    totalDinero >= 0
-                      ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-                      : "border-red-500/25 bg-red-500/10 text-red-300"
-                  }
-                `}
-              >
-                {totalDinero >= 0 ? "Positivo" : "Negativo"}
+              <span className="mt-2 inline-flex rounded-lg border border-red-500/25 bg-red-500/10 px-2 py-1 text-[10px] font-bold text-red-300">
+                {cuentasPorMoneda.PEN.length} cuentas PEN
               </span>
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-            <div
-              className="
-                flex
-                h-12
-                w-12
-                shrink-0
-                items-center
-                justify-center
-                rounded-2xl
-                border-2
-                border-blue-500/30
-                bg-blue-500/12
-                text-blue-300
-              "
-            >
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border-2 border-emerald-500/30 bg-emerald-500/12 text-emerald-300">
+              <Icon name="trendUp" />
+            </div>
+
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-400">
+                Patrimonio en dólares
+              </p>
+
+              <p
+                className={`mt-2 text-[22px] font-black tracking-tight ${
+                  totalesPorMoneda.USD >= 0
+                    ? "text-emerald-300"
+                    : "text-red-300"
+                }`}
+              >
+                {formatearDinero(totalesPorMoneda.USD, "USD")}
+              </p>
+
+              <span className="mt-2 inline-flex rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[10px] font-bold text-emerald-300">
+                {cuentasPorMoneda.USD.length} cuentas USD
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border-2 border-blue-500/30 bg-blue-500/12 text-blue-300">
               <Icon name="layers" />
             </div>
 
             <div>
-              <p
-                className="
-                  text-[11px]
-                  font-bold
-                  uppercase
-                  tracking-[0.13em]
-                  text-slate-400
-                "
-              >
+              <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-400">
                 Total cuentas
               </p>
 
@@ -1246,106 +1400,29 @@ function Cuentas() {
                 {cuentas.length}
               </p>
 
-              <span
-                className="
-                  mt-2
-                  inline-flex
-                  rounded-lg
-                  border
-                  border-blue-500/25
-                  bg-blue-500/10
-                  px-2
-                  py-1
-                  text-[10px]
-                  font-bold
-                  text-blue-300
-                "
-              >
+              <span className="mt-2 inline-flex rounded-lg border border-blue-500/25 bg-blue-500/10 px-2 py-1 text-[10px] font-bold text-blue-300">
                 Activas
               </span>
             </div>
           </div>
 
           <div className="flex items-center gap-4">
-            <div
-              className="
-                flex
-                h-12
-                w-12
-                shrink-0
-                items-center
-                justify-center
-                rounded-2xl
-                border-2
-                border-emerald-500/30
-                bg-emerald-500/12
-                text-emerald-300
-              "
-            >
-              <Icon name="trendUp" />
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border-2 border-violet-500/30 bg-violet-500/12 text-violet-300">
+              <Icon name="activity" />
             </div>
 
             <div className="min-w-0">
-              <p
-                className="
-                  text-[11px]
-                  font-bold
-                  uppercase
-                  tracking-[0.13em]
-                  text-slate-400
-                "
-              >
-                Cuenta con mayor saldo
+              <p className="text-[11px] font-bold uppercase tracking-[0.13em] text-slate-400">
+                Monedas activas
               </p>
 
-              <p className="mt-2 truncate text-lg font-black text-white">
-                {cuentaMayor?.nombre || "Sin datos"}
+              <p className="mt-2 text-[22px] font-black text-white">
+                {(cuentasPorMoneda.PEN.length > 0 ? 1 : 0) +
+                  (cuentasPorMoneda.USD.length > 0 ? 1 : 0)}
               </p>
 
               <p className="mt-1 text-sm font-semibold text-slate-300">
-                S/ {formatearMonto(cuentaMayor?.saldo_actual)}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div
-              className="
-                flex
-                h-12
-                w-12
-                shrink-0
-                items-center
-                justify-center
-                rounded-2xl
-                border-2
-                border-violet-500/30
-                bg-violet-500/12
-                text-violet-300
-              "
-            >
-              <Icon name="trendDown" />
-            </div>
-
-            <div className="min-w-0">
-              <p
-                className="
-                  text-[11px]
-                  font-bold
-                  uppercase
-                  tracking-[0.13em]
-                  text-slate-400
-                "
-              >
-                Cuenta con menor saldo
-              </p>
-
-              <p className="mt-2 truncate text-lg font-black text-white">
-                {cuentaMenor?.nombre || "Sin datos"}
-              </p>
-
-              <p className="mt-1 text-sm font-semibold text-slate-300">
-                S/ {formatearMonto(cuentaMenor?.saldo_actual)}
+                PEN y USD separados
               </p>
             </div>
           </div>
@@ -1492,7 +1569,9 @@ function Cuentas() {
             {cuentasFiltradas.map((cuenta, index) => {
               const theme = getTheme(index);
               const saldo = Number(cuenta.saldo_actual || 0);
-              const esPrincipal = cuentaMayor?.id === cuenta.id;
+              const esPrincipal =
+                cuentasPorMoneda[normalizarMoneda(cuenta.moneda)]?.[0]?.id ===
+                cuenta.id;
               const accountColor = getAccountColor(cuenta, index);
               const accountIcon = getAccountIcon(cuenta);
               const sinMovimientos = cuenta.cantidad_movimientos === 0;
@@ -1577,9 +1656,14 @@ function Cuentas() {
                             {cuenta.nombre}
                           </h3>
 
-                          <p className="mt-1 text-sm text-slate-400">
-                            {cuenta.tipo || "Sin tipo"}
-                          </p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2">
+                            <p className="text-sm text-slate-400">
+                              {cuenta.tipo || "Sin tipo"}
+                            </p>
+                            <span className="rounded-md border border-white/[0.10] bg-white/[0.05] px-2 py-0.5 text-[10px] font-black text-slate-300">
+                              {normalizarMoneda(cuenta.moneda)}
+                            </span>
+                          </div>
                         </div>
                       </div>
 
@@ -1636,7 +1720,7 @@ function Cuentas() {
                             }
                           `}
                         >
-                          S/ {formatearMonto(saldo)}
+                          {formatearDinero(saldo, cuenta.moneda)}
                         </p>
                       </div>
 
@@ -1930,9 +2014,14 @@ function Cuentas() {
                               {cuenta.nombre}
                             </h3>
 
-                            <p className="mt-1 text-sm text-slate-500">
-                              {cuenta.tipo || "Sin tipo"}
-                            </p>
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                              <p className="text-sm text-slate-500">
+                                {cuenta.tipo || "Sin tipo"}
+                              </p>
+                              <span className="rounded-md border border-white/[0.10] bg-white/[0.05] px-2 py-0.5 text-[10px] font-black text-slate-400">
+                                {normalizarMoneda(cuenta.moneda)}
+                              </span>
+                            </div>
                           </div>
 
                           <span className="shrink-0 rounded-lg border border-amber-500/20 bg-amber-500/[0.08] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-amber-300">
@@ -1958,7 +2047,10 @@ function Cuentas() {
                                 }
                               `}
                             >
-                              S/ {formatearMonto(cuenta.saldo_actual)}
+                              {formatearDinero(
+                                cuenta.saldo_actual,
+                                cuenta.moneda
+                              )}
                             </p>
                           </div>
 
@@ -2161,7 +2253,10 @@ function Cuentas() {
               </p>
 
               <p className="mt-2 text-2xl font-black text-emerald-300">
-                S/ {formatearMonto(totalIngresos)}
+                {formatearDinero(
+                  totalIngresos,
+                  cuentaSeleccionada.moneda
+                )}
               </p>
             </div>
 
@@ -2179,7 +2274,10 @@ function Cuentas() {
               </p>
 
               <p className="mt-2 text-2xl font-black text-red-300">
-                S/ {formatearMonto(totalGastos)}
+                {formatearDinero(
+                  totalGastos,
+                  cuentaSeleccionada.moneda
+                )}
               </p>
             </div>
           </div>
@@ -2278,8 +2376,11 @@ function Cuentas() {
                         }
                       `}
                     >
-                      {ingreso ? "+" : "-"}S/{" "}
-                      {formatearMonto(mov.monto)}
+                      {ingreso ? "+" : "-"}
+                      {formatearDinero(
+                        mov.monto,
+                        cuentaSeleccionada.moneda
+                      )}
                     </p>
                   </div>
                 );
@@ -2381,7 +2482,7 @@ function Cuentas() {
 
                 {cuentas.map((cuenta) => (
                   <option key={cuenta.id} value={cuenta.id}>
-                    {cuenta.nombre}
+                    {cuenta.nombre} · {normalizarMoneda(cuenta.moneda)}
                   </option>
                 ))}
               </select>
@@ -2417,8 +2518,9 @@ function Cuentas() {
                       }
                     `}
                   >
-                    S/ {formatearMonto(
-                      cuentaOrigenSeleccionada.saldo_actual
+                    {formatearDinero(
+                      cuentaOrigenSeleccionada.saldo_actual,
+                      cuentaOrigenSeleccionada.moneda
                     )}
                   </span>
                 </div>
@@ -2443,21 +2545,24 @@ function Cuentas() {
               >
                 <option value="">Seleccionar cuenta de destino</option>
 
-                {cuentas
-                  .filter(
-                    (cuenta) => cuenta.id !== transferencia.origen
-                  )
-                  .map((cuenta) => (
-                    <option key={cuenta.id} value={cuenta.id}>
-                      {cuenta.nombre}
-                    </option>
-                  ))}
+                {cuentasDestinoDisponibles.map((cuenta) => (
+                  <option key={cuenta.id} value={cuenta.id}>
+                    {cuenta.nombre} · {normalizarMoneda(cuenta.moneda)}
+                  </option>
+                ))}
               </select>
+
+              {cuentaOrigenSeleccionada &&
+                cuentasDestinoDisponibles.length === 0 && (
+                  <p className="mt-2 text-xs leading-5 text-amber-300">
+                    Necesitas al menos otra cuenta activa para transferir.
+                  </p>
+                )}
             </div>
 
             <div>
               <label className="mb-2.5 block text-sm font-semibold text-slate-300">
-                Monto
+                Monto a enviar
               </label>
 
               <input
@@ -2465,7 +2570,11 @@ function Cuentas() {
                 min="0"
                 step="0.01"
                 disabled={transfiriendo}
-                placeholder="S/ 0.00"
+                placeholder={
+                  cuentaOrigenSeleccionada?.moneda === "USD"
+                    ? "$ 0.00"
+                    : "S/ 0.00"
+                }
                 value={transferencia.monto}
                 onChange={(e) =>
                   setTransferencia({
@@ -2477,9 +2586,104 @@ function Cuentas() {
               />
             </div>
 
+            {requiereConversion && (
+              <div
+                className="
+                  rounded-2xl
+                  border
+                  border-amber-500/25
+                  bg-amber-500/[0.07]
+                  p-4
+                "
+              >
+                <label className="block text-sm font-semibold text-amber-200">
+                  Tipo de cambio manual
+                </label>
+
+                <div className="mt-2 flex items-center gap-3">
+                  <span className="shrink-0 text-sm font-bold text-slate-300">
+                    1 USD = S/
+                  </span>
+
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.0001"
+                    disabled={transfiriendo}
+                    value={tipoCambio}
+                    onChange={(e) => {
+                      const valor = e.target.value;
+                      setTipoCambio(valor);
+
+                      if (typeof window !== "undefined") {
+                        window.localStorage.setItem(
+                          "black-ghost-tipo-cambio-usd-pen",
+                          valor
+                        );
+                      }
+                    }}
+                    placeholder="3.6000"
+                    className={inputClass}
+                  />
+                </div>
+
+                <p className="mt-3 text-xs leading-5 text-slate-400">
+                  Tú decides el tipo de cambio utilizado. El último valor queda
+                  guardado en este navegador y puedes actualizarlo cuando cambie.
+                </p>
+              </div>
+            )}
+
+            {cuentaOrigenSeleccionada &&
+              cuentaDestinoSeleccionada &&
+              Number(transferencia.monto) > 0 && (
+                <div
+                  className="
+                    rounded-2xl
+                    border
+                    border-violet-500/25
+                    bg-violet-500/[0.07]
+                    p-5
+                  "
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-sm font-semibold text-slate-400">
+                      La cuenta de destino recibirá
+                    </span>
+
+                    <span className="text-xl font-black text-white">
+                      {montoDestinoCalculado > 0
+                        ? formatearDinero(
+                            montoDestinoCalculado,
+                            cuentaDestinoSeleccionada.moneda
+                          )
+                        : "—"}
+                    </span>
+                  </div>
+
+                  {requiereConversion && Number(tipoCambio) > 0 && (
+                    <p className="mt-2 text-xs text-violet-300">
+                      Conversión aplicada: 1 USD = S/ {Number(
+                        tipoCambio
+                      ).toLocaleString("es-PE", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 4,
+                      })}
+                    </p>
+                  )}
+                </div>
+              )}
+
             <button
               type="button"
-              disabled={transfiriendo || cuentas.length < 2}
+              disabled={
+                transfiriendo ||
+                !cuentaOrigenSeleccionada ||
+                !cuentaDestinoSeleccionada ||
+                !Number(transferencia.monto) ||
+                (requiereConversion &&
+                  (!Number(tipoCambio) || Number(tipoCambio) <= 0))
+              }
               onClick={transferir}
               className="
                 mt-2
@@ -2654,142 +2858,128 @@ function Cuentas() {
           sm:p-8
         "
       >
-        <div
-          className="
-            grid
-            grid-cols-1
-            items-center
-            gap-10
-            lg:grid-cols-[180px_minmax(0,1fr)_310px]
-          "
-        >
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-xl font-black text-white">
+              Resumen de saldos
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">
+              Distribución separada por moneda, sin mezclar soles y dólares.
+            </p>
+          </div>
+
+          <div className="flex h-11 overflow-hidden rounded-xl border border-white/[0.10] bg-black/25">
+            {currencyOptions.map((opcion) => (
+              <button
+                key={opcion.value}
+                type="button"
+                onClick={() => setMonedaResumen(opcion.value)}
+                className={`px-4 text-xs font-black transition ${
+                  monedaResumen === opcion.value
+                    ? "bg-red-500/15 text-red-300"
+                    : "text-slate-400 hover:bg-white/[0.05] hover:text-white"
+                }`}
+              >
+                {opcion.value}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 items-center gap-10 lg:grid-cols-[180px_minmax(0,1fr)_310px]">
           <div className="flex justify-center">
             <div
-              className="
-                relative
-                h-36
-                w-36
-                rounded-full
-                shadow-[0_0_40px_rgba(37,99,235,0.12)]
-              "
-              style={{
-                background: donutBackground,
-              }}
+              className="relative h-36 w-36 rounded-full shadow-[0_0_40px_rgba(37,99,235,0.12)]"
+              style={{ background: donutBackground }}
             >
-              <div
-                className="
-                  absolute
-                  inset-[22px]
-                  flex
-                  items-center
-                  justify-center
-                  rounded-full
-                  border
-                  border-white/[0.08]
-                  bg-[#080c14]
-                "
-              >
-                <Icon
-                  name="activity"
-                  className="h-7 w-7 text-slate-500"
-                />
+              <div className="absolute inset-[22px] flex flex-col items-center justify-center rounded-full border border-white/[0.08] bg-[#080c14]">
+                <span className="text-sm font-black text-white">
+                  {monedaResumen}
+                </span>
+                <span className="mt-1 text-[10px] font-bold text-slate-500">
+                  {cuentasResumen.length} cuentas
+                </span>
               </div>
             </div>
           </div>
 
           <div>
-            <h2 className="text-xl font-black text-white">
-              Resumen de saldos
-            </h2>
+            {cuentasResumen.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-white/[0.12] bg-black/15 px-6 py-9 text-center">
+                <p className="text-sm font-bold text-slate-300">
+                  No tienes cuentas activas en {monedaResumen}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {cuentasResumen.slice(0, 6).map((cuenta, index) => {
+                  const porcentaje =
+                    totalAbsolutoResumen > 0
+                      ? (Math.abs(Number(cuenta.saldo_actual || 0)) /
+                          totalAbsolutoResumen) *
+                        100
+                      : 0;
 
-            <p className="mt-1 text-sm text-slate-400">
-              Distribución del valor absoluto de tus cuentas.
-            </p>
+                  return (
+                    <div
+                      key={cuenta.id}
+                      className="grid grid-cols-[minmax(0,1fr)_130px_65px] items-center gap-4 text-sm"
+                    >
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor: getAccountColor(cuenta, index),
+                          }}
+                        />
+                        <span className="truncate font-semibold text-slate-300">
+                          {cuenta.nombre}
+                        </span>
+                      </div>
 
-            <div className="mt-6 space-y-3">
-              {cuentas.slice(0, 6).map((cuenta, index) => {
-                const porcentaje =
-                  totalAbsoluto > 0
-                    ? (Math.abs(Number(cuenta.saldo_actual || 0)) /
-                        totalAbsoluto) *
-                      100
-                    : 0;
+                      <span className="text-right font-bold text-white">
+                        {formatearDinero(
+                          cuenta.saldo_actual,
+                          cuenta.moneda
+                        )}
+                      </span>
 
-                return (
-                  <div
-                    key={cuenta.id}
-                    className="
-                      grid
-                      grid-cols-[minmax(0,1fr)_110px_65px]
-                      items-center
-                      gap-4
-                      text-sm
-                    "
-                  >
-                    <div className="flex min-w-0 items-center gap-2.5">
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full"
-                        style={{
-                          backgroundColor:
-                            getAccountColor(cuenta, index),
-                        }}
-                      />
-
-                      <span className="truncate font-semibold text-slate-300">
-                        {cuenta.nombre}
+                      <span className="text-right text-slate-400">
+                        {porcentaje.toFixed(1)}%
                       </span>
                     </div>
-
-                    <span className="text-right font-bold text-white">
-                      S/ {formatearMonto(cuenta.saldo_actual)}
-                    </span>
-
-                    <span className="text-right text-slate-400">
-                      {porcentaje.toFixed(1)}%
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          <div
-            className="
-              rounded-[22px]
-              border
-              border-white/[0.10]
-              bg-black/20
-              p-6
-            "
-          >
+          <div className="rounded-[22px] border border-white/[0.10] bg-black/20 p-6">
             <p className="text-sm font-semibold text-slate-400">
-              Saldo total
+              Saldo total en {getCurrencyInfo(monedaResumen).shortLabel}
             </p>
 
             <p
-              className={`
-                mt-2
-                text-[28px]
-                font-black
-                tracking-tight
-                ${
-                  totalDinero >= 0
-                    ? "text-emerald-300"
-                    : "text-red-300"
-                }
-              `}
+              className={`mt-2 text-[28px] font-black tracking-tight ${
+                totalesPorMoneda[monedaResumen] >= 0
+                  ? "text-emerald-300"
+                  : "text-red-300"
+              }`}
             >
-              S/ {formatearMonto(totalDinero)}
+              {formatearDinero(
+                totalesPorMoneda[monedaResumen],
+                monedaResumen
+              )}
             </p>
 
             <div className="mt-7 h-px bg-white/[0.08]" />
 
             <p className="mt-6 text-sm text-slate-400">
-              Cuentas activas
+              Cuentas activas en {monedaResumen}
             </p>
 
             <p className="mt-2 text-base font-black text-white">
-              {cuentas.length} de {totalCuentas}
+              {cuentasResumen.length} de {totalCuentas}
             </p>
           </div>
         </div>
@@ -2900,8 +3090,9 @@ function Cuentas() {
                         }
                       `}
                     >
-                      S/ {formatearMonto(
-                        cuentaParaArchivar.saldo_actual
+                      {formatearDinero(
+                        cuentaParaArchivar.saldo_actual,
+                        cuentaParaArchivar.moneda
                       )}
                     </p>
                   </div>
@@ -3087,7 +3278,10 @@ function Cuentas() {
                         }
                       `}
                     >
-                      S/ {formatearMonto(cuentaParaEliminar.saldo_actual)}
+                      {formatearDinero(
+                          cuentaParaEliminar.saldo_actual,
+                          cuentaParaEliminar.moneda
+                        )}
                     </p>
                   </div>
 
@@ -3284,6 +3478,87 @@ function Cuentas() {
                 </select>
               </div>
 
+              <div className="rounded-2xl border border-white/[0.10] bg-white/[0.035] p-4">
+                <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">
+                  Información de seguridad
+                </p>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500">
+                      Saldo inicial
+                    </p>
+                    <p className="mt-1 text-sm font-black text-white">
+                      {formatearDinero(
+                        editando.saldo_inicial,
+                        editando.moneda
+                      )}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500">
+                      Movimientos
+                    </p>
+                    <p className="mt-1 text-sm font-black text-white">
+                      {editando.cantidad_movimientos ?? "—"}
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500">
+                      Estado
+                    </p>
+                    <p className={`mt-1 text-sm font-black ${
+                      puedeEditarSaldoInicial
+                        ? "text-emerald-300"
+                        : "text-amber-300"
+                    }`}>
+                      {puedeEditarSaldoInicial
+                        ? "Editable"
+                        : "Saldo protegido"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-2.5 flex items-center justify-between gap-3">
+                  <label className="text-sm font-semibold text-slate-300">
+                    Moneda
+                  </label>
+
+                  <span
+                    className={`rounded-lg border px-2 py-1 text-[10px] font-black uppercase tracking-[0.08em] ${
+                      puedeEditarSaldoInicial
+                        ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+                        : "border-amber-500/25 bg-amber-500/10 text-amber-300"
+                    }`}
+                  >
+                    {puedeEditarSaldoInicial ? "Editable" : "Protegida"}
+                  </span>
+                </div>
+
+                <select
+                  value={monedaEdit}
+                  disabled={!puedeEditarSaldoInicial}
+                  onChange={(e) => setMonedaEdit(e.target.value)}
+                  className={inputClass}
+                >
+                  {currencyOptions.map((opcion) => (
+                    <option key={opcion.value} value={opcion.value}>
+                      {opcion.label} ({opcion.code})
+                    </option>
+                  ))}
+                </select>
+
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  {puedeEditarSaldoInicial
+                    ? "Puedes cambiarla porque esta cuenta todavía no tiene movimientos."
+                    : "La moneda está bloqueada para mantener consistente todo el historial financiero."}
+                </p>
+              </div>
+
               <div>
                 <div className="mb-2.5 flex items-center justify-between gap-3">
                   <label className="text-sm font-semibold text-slate-300">
@@ -3317,7 +3592,7 @@ function Cuentas() {
                   value={saldoInicialEdit}
                   disabled={!puedeEditarSaldoInicial}
                   onChange={(e) => setSaldoInicialEdit(e.target.value)}
-                  placeholder="S/ 0.00"
+                  placeholder={monedaEdit === "USD" ? "$ 0.00" : "S/ 0.00"}
                   className={inputClass}
                 />
 
@@ -3448,6 +3723,12 @@ function Cuentas() {
 
                   <p className="mt-1 truncate text-base font-black text-white">
                     {nombre.trim() || "Nombre de la cuenta"}
+                  </p>
+                  <p className="mt-1 text-xs font-bold text-slate-500">
+                    {normalizarMoneda(monedaEdit)} · {formatearDinero(
+                      Number(saldoInicialEdit || 0),
+                      monedaEdit
+                    )}
                   </p>
                 </div>
               </div>
