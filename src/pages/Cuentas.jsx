@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../services/supabase";
 import CuentaForm from "../components/CuentaForm";
 
+const ZONA_HORARIA = "America/Lima";
+
 /* =========================================================
    ICONOS
 ========================================================= */
@@ -179,6 +181,82 @@ function Icon({ name, className = "h-5 w-5" }) {
   };
 
   return <svg {...props}>{icons[name]}</svg>;
+}
+
+function esTransferencia(movimiento) {
+  if (movimiento?.transferencia_id) return true;
+
+  const descripcion = String(
+    movimiento?.descripcion || ""
+  )
+    .trim()
+    .toLowerCase();
+
+  return descripcion.startsWith("transferencia");
+}
+
+function convertirMovimientoAFechaLocal(movimiento) {
+  if (!movimiento?.fecha) return null;
+
+  const textoFecha = String(movimiento.fecha);
+
+  if (textoFecha.includes("T")) {
+    const fechaISO = new Date(textoFecha);
+    return Number.isNaN(fechaISO.getTime()) ? null : fechaISO;
+  }
+
+  const fecha = textoFecha.slice(0, 10);
+  const horaOriginal = String(movimiento.hora || "00:00:00");
+  const coincidencia = horaOriginal.match(
+    /^(\d{1,2}):(\d{2})(?::(\d{2}))?/
+  );
+
+  const hora = String(
+    Number(coincidencia?.[1] || 0)
+  ).padStart(2, "0");
+
+  const minutos = String(
+    Number(coincidencia?.[2] || 0)
+  ).padStart(2, "0");
+
+  const segundos = String(
+    Number(coincidencia?.[3] || 0)
+  ).padStart(2, "0");
+
+  const fechaUTC = new Date(
+    `${fecha}T${hora}:${minutos}:${segundos}Z`
+  );
+
+  return Number.isNaN(fechaUTC.getTime())
+    ? null
+    : fechaUTC;
+}
+
+function formatearFechaMovimiento(movimiento) {
+  const fecha = convertirMovimientoAFechaLocal(movimiento);
+
+  if (!fecha) return "Sin fecha";
+
+  return new Intl.DateTimeFormat("es-PE", {
+    timeZone: ZONA_HORARIA,
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(fecha);
+}
+
+function formatearHoraMovimiento(movimiento) {
+  const fecha = convertirMovimientoAFechaLocal(movimiento);
+
+  if (!fecha) return "";
+
+  return new Intl.DateTimeFormat("es-PE", {
+    timeZone: ZONA_HORARIA,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).format(fecha);
 }
 
 /* =========================================================
@@ -1151,6 +1229,7 @@ function Cuentas() {
         monto,
         descripcion,
         fecha,
+        hora,
         transferencia_id,
         categorias(
           nombre
@@ -1158,7 +1237,8 @@ function Cuentas() {
       `)
       .eq("cuenta_id", cuenta.id)
       .eq("usuario_id", user.id)
-      .order("fecha", { ascending: false });
+      .order("fecha", { ascending: false })
+      .order("hora", { ascending: false });
 
     if (error) {
       console.log(error);
@@ -1171,6 +1251,8 @@ function Cuentas() {
     let gastos = 0;
 
     data?.forEach((mov) => {
+      if (esTransferencia(mov)) return;
+
       if (mov.tipo === "INGRESO") {
         ingresos += Number(mov.monto);
       }
@@ -1199,16 +1281,6 @@ function Cuentas() {
     setIconoEdit("💳");
     setSaldoInicialEdit("");
     setMonedaEdit("PEN");
-  }
-
-  function formatearFecha(fecha) {
-    if (!fecha) return "Sin fecha";
-
-    return new Date(fecha).toLocaleDateString("es-PE", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
   }
 
   function irANuevaCuenta() {
@@ -2249,7 +2321,7 @@ function Cuentas() {
               "
             >
               <p className="text-sm font-semibold text-slate-400">
-                Ingresos
+                Ingresos reales
               </p>
 
               <p className="mt-2 text-2xl font-black text-emerald-300">
@@ -2257,6 +2329,10 @@ function Cuentas() {
                   totalIngresos,
                   cuentaSeleccionada.moneda
                 )}
+              </p>
+
+              <p className="mt-2 text-xs text-emerald-300/70">
+                Transferencias internas excluidas
               </p>
             </div>
 
@@ -2270,7 +2346,7 @@ function Cuentas() {
               "
             >
               <p className="text-sm font-semibold text-slate-400">
-                Gastos
+                Gastos reales
               </p>
 
               <p className="mt-2 text-2xl font-black text-red-300">
@@ -2278,6 +2354,10 @@ function Cuentas() {
                   totalGastos,
                   cuentaSeleccionada.moneda
                 )}
+              </p>
+
+              <p className="mt-2 text-xs text-red-300/70">
+                Transferencias internas excluidas
               </p>
             </div>
           </div>
@@ -2290,6 +2370,11 @@ function Cuentas() {
             <div className="divide-y divide-white/[0.08]">
               {movimientos.map((mov) => {
                 const ingreso = mov.tipo === "INGRESO";
+                const transferenciaInterna = esTransferencia(mov);
+                const fechaMovimiento =
+                  formatearFechaMovimiento(mov);
+                const horaMovimiento =
+                  formatearHoraMovimiento(mov);
 
                 return (
                   <div
@@ -2302,7 +2387,7 @@ function Cuentas() {
                       py-5
                       transition
                       hover:bg-white/[0.025]
-                      sm:grid-cols-[110px_minmax(0,1fr)_140px_130px]
+                      sm:grid-cols-[125px_minmax(0,1fr)_170px_130px]
                       sm:items-center
                       sm:px-8
                     "
@@ -2317,13 +2402,17 @@ function Cuentas() {
                         text-xs
                         font-black
                         ${
-                          ingreso
-                            ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
-                            : "border-red-500/25 bg-red-500/10 text-red-300"
+                          transferenciaInterna
+                            ? "border-blue-500/25 bg-blue-500/10 text-blue-300"
+                            : ingreso
+                              ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"
+                              : "border-red-500/25 bg-red-500/10 text-red-300"
                         }
                       `}
                     >
-                      {mov.tipo}
+                      {transferenciaInterna
+                        ? "TRANSFERENCIA"
+                        : mov.tipo}
                     </span>
 
                     <div className="min-w-0">
@@ -2333,10 +2422,14 @@ function Cuentas() {
 
                       <div className="mt-1 flex flex-wrap items-center gap-2">
                         <p className="text-xs text-slate-500">
-                          {mov.categorias?.nombre || "Sin categoría"}
+                          {mov.categorias?.nombre ||
+                            (transferenciaInterna
+                              ? "Transferencia interna"
+                              : "Sin categoría")}
                         </p>
 
-                        {mov.transferencia_id && (
+                        {transferenciaInterna &&
+                          mov.transferencia_id && (
                           <span
                             className="
                               rounded-md
@@ -2361,7 +2454,10 @@ function Cuentas() {
                     </div>
 
                     <p className="text-sm text-slate-400">
-                      {formatearFecha(mov.fecha)}
+                      {fechaMovimiento}
+                      {horaMovimiento
+                        ? ` · ${horaMovimiento}`
+                        : ""}
                     </p>
 
                     <p
@@ -2370,9 +2466,11 @@ function Cuentas() {
                         text-base
                         font-black
                         ${
-                          ingreso
-                            ? "text-emerald-300"
-                            : "text-red-300"
+                          transferenciaInterna
+                            ? "text-blue-300"
+                            : ingreso
+                              ? "text-emerald-300"
+                              : "text-red-300"
                         }
                       `}
                     >

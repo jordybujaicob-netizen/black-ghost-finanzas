@@ -2,12 +2,73 @@ import { useEffect, useMemo, useState } from "react";
 
 import { supabase } from "../services/supabase";
 
+const ZONA_HORARIA = "America/Lima";
+const DESFASE_LIMA = "-05:00";
+
 function normalizarMoneda(moneda) {
   return moneda === "USD" ? "USD" : "PEN";
 }
 
 function getSimboloMoneda(moneda) {
   return normalizarMoneda(moneda) === "USD" ? "$" : "S/";
+}
+
+function obtenerPartesFechaHoraLima(fecha = new Date()) {
+  const partes = new Intl.DateTimeFormat("en-GB", {
+    timeZone: ZONA_HORARIA,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(fecha);
+
+  const resultado = {};
+
+  partes.forEach((parte) => {
+    if (parte.type !== "literal") {
+      resultado[parte.type] = parte.value;
+    }
+  });
+
+  return resultado;
+}
+
+function obtenerFechaActualLima() {
+  const partes = obtenerPartesFechaHoraLima();
+
+  return `${partes.year}-${partes.month}-${partes.day}`;
+}
+
+function convertirFechaLimaAUtc(fechaLima) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fechaLima || ""))) {
+    return null;
+  }
+
+  const partesHora = obtenerPartesFechaHoraLima();
+
+  const horaLocal = [
+    partesHora.hour,
+    partesHora.minute,
+    partesHora.second,
+  ].join(":");
+
+  const instante = new Date(
+    `${fechaLima}T${horaLocal}${DESFASE_LIMA}`
+  );
+
+  if (Number.isNaN(instante.getTime())) {
+    return null;
+  }
+
+  const fechaIso = instante.toISOString();
+
+  return {
+    fecha: fechaIso.slice(0, 10),
+    hora: fechaIso.slice(11, 19),
+  };
 }
 
 function MovimientoForm({ onSaved }) {
@@ -18,9 +79,15 @@ function MovimientoForm({ onSaved }) {
   const [cuentas, setCuentas] = useState([]);
   const [cuentaId, setCuentaId] = useState("");
   const [descripcion, setDescripcion] = useState("");
+  const [fechaMovimiento, setFechaMovimiento] = useState(() =>
+    obtenerFechaActualLima()
+  );
+
   const [mensaje, setMensaje] = useState("");
   const [tipoMensaje, setTipoMensaje] = useState("");
   const [guardando, setGuardando] = useState(false);
+
+  const fechaMaxima = obtenerFechaActualLima();
 
   useEffect(() => {
     cargarCategorias();
@@ -28,14 +95,20 @@ function MovimientoForm({ onSaved }) {
   }, []);
 
   const cuentaSeleccionada = useMemo(
-    () => cuentas.find((cuenta) => cuenta.id === cuentaId) || null,
+    () =>
+      cuentas.find(
+        (cuenta) => String(cuenta.id) === String(cuentaId)
+      ) || null,
     [cuentas, cuentaId]
   );
 
   const monedaSeleccionada = normalizarMoneda(
     cuentaSeleccionada?.moneda
   );
-  const simboloSeleccionado = getSimboloMoneda(monedaSeleccionada);
+
+  const simboloSeleccionado = getSimboloMoneda(
+    monedaSeleccionada
+  );
 
   async function cargarCategorias() {
     const {
@@ -111,12 +184,42 @@ function MovimientoForm({ onSaved }) {
       return;
     }
 
+    if (!fechaMovimiento) {
+      mostrarMensaje(
+        "Selecciona la fecha del movimiento",
+        "error"
+      );
+      return;
+    }
+
+    if (fechaMovimiento > fechaMaxima) {
+      mostrarMensaje(
+        "La fecha del movimiento no puede ser futura",
+        "error"
+      );
+      return;
+    }
+
+    const fechaHoraUtc =
+      convertirFechaLimaAUtc(fechaMovimiento);
+
+    if (!fechaHoraUtc) {
+      mostrarMensaje(
+        "La fecha seleccionada no es válida",
+        "error"
+      );
+      return;
+    }
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) {
-      mostrarMensaje("Tu sesión terminó. Vuelve a iniciar sesión", "error");
+      mostrarMensaje(
+        "Tu sesión terminó. Vuelve a iniciar sesión",
+        "error"
+      );
       return;
     }
 
@@ -132,12 +235,16 @@ function MovimientoForm({ onSaved }) {
           categoria_id: categoriaId || null,
           cuenta_id: cuentaId,
           descripcion: descripcion.trim(),
-          fecha: new Date().toISOString(),
+          fecha: fechaHoraUtc.fecha,
+          hora: fechaHoraUtc.hora,
         });
 
       if (error) {
         console.log(error);
-        mostrarMensaje("Error guardando movimiento", "error");
+        mostrarMensaje(
+          "Error guardando movimiento",
+          "error"
+        );
         return;
       }
 
@@ -146,6 +253,7 @@ function MovimientoForm({ onSaved }) {
       setCategoriaId("");
       setCuentaId("");
       setTipo("GASTO");
+      setFechaMovimiento(obtenerFechaActualLima());
 
       mostrarMensaje(
         "Movimiento registrado correctamente",
@@ -212,7 +320,7 @@ function MovimientoForm({ onSaved }) {
           </h2>
 
           <p className="mt-1.5 text-sm text-slate-400">
-            Registra un ingreso o gasto en la moneda de la cuenta.
+            Registra un ingreso o gasto con su fecha real.
           </p>
         </div>
 
@@ -275,6 +383,38 @@ function MovimientoForm({ onSaved }) {
 
         <div>
           <label
+            htmlFor="movimiento-fecha"
+            className="
+              text-[11px]
+              font-bold
+              uppercase
+              tracking-[0.09em]
+              text-slate-400
+            "
+          >
+            Fecha del movimiento
+          </label>
+
+          <input
+            id="movimiento-fecha"
+            type="date"
+            value={fechaMovimiento}
+            max={fechaMaxima}
+            disabled={guardando}
+            onChange={(e) =>
+              setFechaMovimiento(e.target.value)
+            }
+            className={`${fieldClass} [color-scheme:dark]`}
+          />
+
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            Selecciona el día real en que ocurrió el ingreso o
+            gasto.
+          </p>
+        </div>
+
+        <div>
+          <label
             htmlFor="movimiento-cuenta"
             className="
               text-[11px]
@@ -298,7 +438,8 @@ function MovimientoForm({ onSaved }) {
 
             {cuentas.map((cuenta) => (
               <option key={cuenta.id} value={cuenta.id}>
-                {cuenta.nombre} · {normalizarMoneda(cuenta.moneda)}
+                {cuenta.nombre} ·{" "}
+                {normalizarMoneda(cuenta.moneda)}
               </option>
             ))}
           </select>
@@ -348,16 +489,28 @@ function MovimientoForm({ onSaved }) {
             id="movimiento-categoria"
             value={categoriaId}
             disabled={guardando}
-            onChange={(e) => setCategoriaId(e.target.value)}
+            onChange={(e) =>
+              setCategoriaId(e.target.value)
+            }
             className={`${fieldClass} bg-[#06090f]`}
           >
-            <option value="">Seleccionar categoría</option>
+            <option value="">
+              {tipo === "GASTO"
+                ? "Seleccionar categoría"
+                : "Sin categoría"}
+            </option>
 
             {categorias
-              .filter((cat) => cat.tipo === tipo || !cat.tipo)
-              .map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.nombre}
+              .filter(
+                (categoria) =>
+                  categoria.tipo === tipo || !categoria.tipo
+              )
+              .map((categoria) => (
+                <option
+                  key={categoria.id}
+                  value={categoria.id}
+                >
+                  {categoria.nombre}
                 </option>
               ))}
           </select>
@@ -380,7 +533,7 @@ function MovimientoForm({ onSaved }) {
           <input
             id="movimiento-monto"
             type="number"
-            min="0"
+            min="0.01"
             step="0.01"
             disabled={guardando}
             value={monto}
@@ -390,7 +543,7 @@ function MovimientoForm({ onSaved }) {
           />
         </div>
 
-        <div className="md:col-span-2">
+        <div>
           <label
             htmlFor="movimiento-descripcion"
             className="
@@ -408,7 +561,9 @@ function MovimientoForm({ onSaved }) {
             id="movimiento-descripcion"
             value={descripcion}
             disabled={guardando}
-            onChange={(e) => setDescripcion(e.target.value)}
+            onChange={(e) =>
+              setDescripcion(e.target.value)
+            }
             placeholder="Ej.: Pago de servicios"
             className={fieldClass}
           />
@@ -444,7 +599,9 @@ function MovimientoForm({ onSaved }) {
           disabled:opacity-50
         "
       >
-        {guardando ? "GUARDANDO..." : "GUARDAR MOVIMIENTO"}
+        {guardando
+          ? "GUARDANDO..."
+          : "GUARDAR MOVIMIENTO"}
       </button>
 
       {mensaje && (
